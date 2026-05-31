@@ -121,6 +121,7 @@ pub fn run() {
             commands::events::delete_event,
             commands::events::get_event_count,
             commands::events::test_insert_clipboard_event,
+            commands::events::delete_all_events,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -222,6 +222,13 @@ impl Database {
         Ok(())
     }
 
+    /// Delete all events (use with caution)
+    pub fn delete_all_events(&self) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM events WHERE pinned = 0", [])?;
+        Ok(())
+    }
+
     /// Get events by timestamp range with full metadata
     pub fn get_events_by_timestamp_range(&self, start_ms: i64, end_ms: i64) -> StorageResult<Vec<EventRecord>> {
         let conn = self.conn.lock().unwrap();

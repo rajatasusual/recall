@@ -62,6 +62,11 @@ pub fn delete_event(event_id: String, db: State<'_, Arc<Database>>) -> Result<()
     db.delete_event(&event_id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn delete_all_events(db: State<'_, Arc<Database>>) -> Result<(), String> {
+    db.delete_all_events().map_err(|e| e.to_string())
+}
+
 /// Get pinned events
 #[tauri::command]
 pub fn get_pinned_events(db: State<'_, Arc<Database>>) -> Result<Vec<serde_json::Value>, String> {

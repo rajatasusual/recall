@@ -87,7 +87,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
 
   useEffect(() => {
     // initial load and subscribe to backend 'events:new' for near-realtime updates
-    let stop: () => void = () => {};
+    let stop: () => void = () => { };
     (async () => {
       await loadEvents();
       try {
@@ -182,6 +182,16 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
               <span class="toast">{toastMessage}</span>
             )}
           </div>
+          <div>
+            <button class="delete-all-btn" onClick={() => {
+              setClickedBtn(`delete_all`);
+              setTimeout(() => setClickedBtn(null), 420);
+              invoke("delete_all_events").then(() => loadEvents());
+              setToastMessage("All unpinned events deleted.");
+            }}>
+              🧹
+            </button>
+          </div>
         </div>
       </div>
 
@@ -217,7 +227,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
                   {event.payload.type === "clipboard_image" ? (
                     event.payload.preview ? (
                       // render small preview image
-                      <img src={event.payload.preview} alt="clipboard" style="max-width:240px;max-height:240px;border-radius:6px" />
+                      <img src={event.payload.preview} alt="clipboard" style="max-width:80px;max-height:80px;border-radius:6px" />
                     ) : (
                       <span>[image]</span>
                     )
@@ -229,51 +239,51 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
                   )}
                 </div>
                 <div class="event-actions">
-                    <button
-                      class={`pin-btn ${event.pinned ? "pinned" : ""} ${clickedBtn === `${event.id}:pin` ? 'clicked' : ''}`}
-                      onClick={() => {
-                        setClickedBtn(`${event.id}:pin`);
-                        setTimeout(() => setClickedBtn(null), 420);
-                        handlePin(event.id, event.pinned);
-                      }}
-                      title={event.pinned ? "Unpin" : "Pin"}
-                    >
-                      {event.pinned ? "📌" : "📍"}
-                    </button>
-                    <button
-                      class={`copy-btn ${clickedBtn === `${event.id}:copy` ? 'clicked' : ''}`}
-                      onClick={async () => {
-                        try {
-                          let content: string;
-                          if (event.payload.type === "clipboard_image") {
-                            content = event.payload.preview ?? event.content_hash ?? JSON.stringify(event.payload);
-                          } else {
-                            content = event.payload?.content ?? JSON.stringify(event.payload);
-                          }
-                          await copyToClipboard(String(content));
-                          setClickedBtn(`${event.id}:copy`);
-                          setTimeout(() => setClickedBtn(null), 420);
-                          showToast("Copied");
-                        } catch (err) {
-                          console.error("Failed to copy to clipboard:", err);
+                  <button
+                    class={`pin-btn ${event.pinned ? "pinned" : ""} ${clickedBtn === `${event.id}:pin` ? 'clicked' : ''}`}
+                    onClick={() => {
+                      setClickedBtn(`${event.id}:pin`);
+                      setTimeout(() => setClickedBtn(null), 420);
+                      handlePin(event.id, event.pinned);
+                    }}
+                    title={event.pinned ? "Unpin" : "Pin"}
+                  >
+                    {event.pinned ? "📌" : "📍"}
+                  </button>
+                  <button
+                    class={`copy-btn ${clickedBtn === `${event.id}:copy` ? 'clicked' : ''}`}
+                    onClick={async () => {
+                      try {
+                        let content: string;
+                        if (event.payload.type === "clipboard_image") {
+                          content = event.payload.preview ?? event.content_hash ?? JSON.stringify(event.payload);
+                        } else {
+                          content = event.payload?.content ?? JSON.stringify(event.payload);
                         }
-                      }}
-                      title="Copy to clipboard"
-                    >
-                      Copy
-                    </button>
-                    <button
-                      class={`delete-btn ${clickedBtn === `${event.id}:delete` ? 'clicked' : ''}`}
-                      onClick={() => {
-                        setClickedBtn(`${event.id}:delete`);
+                        await copyToClipboard(String(content));
+                        setClickedBtn(`${event.id}:copy`);
                         setTimeout(() => setClickedBtn(null), 420);
-                        handleDelete(event.id);
-                      }}
-                      title="Delete"
-                    >
-                      🗑️
-                    </button>
-                  </div>
+                        showToast("Copied");
+                      } catch (err) {
+                        console.error("Failed to copy to clipboard:", err);
+                      }
+                    }}
+                    title="Copy to clipboard"
+                  >
+                    Copy
+                  </button>
+                  <button
+                    class={`delete-btn ${clickedBtn === `${event.id}:delete` ? 'clicked' : ''}`}
+                    onClick={() => {
+                      setClickedBtn(`${event.id}:delete`);
+                      setTimeout(() => setClickedBtn(null), 420);
+                      handleDelete(event.id);
+                    }}
+                    title="Delete"
+                  >
+                    🗑️
+                  </button>
+                </div>
               </div>
             ))}
           </div>

@@ -2,7 +2,7 @@
 
 ## Brief
 
-Recall captures clipboard items (text and images), stores them locally, and provides a small Tauri + Preact UI to browse, pin, filter and restore clipboard entries. Images are automatically encoded to PNG, deduplicated by content hash, and displayed with preview thumbnails in the timeline.
+Recall captures clipboard items (text and images), stores them locally, and provides a small Tauri + Preact UI to browse, pin, filter and restore clipboard entries. Images are automatically encoded to PNG, deduplicated by content hash, and displayed with preview thumbnails in the timeline. A system tray menu now also exposes the last 10 pinned clipboard items for fast restore back to the active clipboard.
 
 ## Quick start (development)
 
@@ -46,6 +46,7 @@ Frontend (src)
 
 - Preact + TypeScript UI lives in `src/` and components are under `src/components/`.
 - `EventTimeline` is the main view: supports filtering by pinned and by application, pin/unpin, delete, copy back to clipboard, and shows a small toast on copy.
+- System tray menu: the last 10 pinned clipboard items are surfaced in the tray menu for quick restore back to the system clipboard.
 - **Image preview**: When an event payload type is `clipboard_image`, the UI renders an inline image preview (max 240×240px) sourced from the preview data URL stored in the event.
 
 ## Design notes
@@ -68,7 +69,7 @@ Frontend (src)
 - Add search and tag extraction
 - Add more content types (files, rich text formatting)
 - Add blob retrieval endpoint for full-quality image downloads
-- Improve clipboard image-to-clipboard restore (platform-specific native image copy)
+- Improve timeline image copy and cross-platform native image clipboard restore
 
 ## License
 MIT

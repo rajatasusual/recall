@@ -20,6 +20,7 @@ Recall is a Tauri desktop app with a Rust backend and a Preact frontend. The bac
     - Captures context (frontmost app and window title on macOS via `osascript`).
   - `storage` — DB layer (`db.rs`) and schema (`schema.rs`) manage `events`, `blobs`, and `edges` tables. `EventWriter` batches writes for efficiency and creates temporal edges between consecutive events. Blob insertion is best-effort to avoid blocking event writes.
   - `commands` — Tauri-invokable handlers that map to storage operations (get, filter, pin/unpin, delete).
+  - `lib.rs` — application bootstrap and tray menu wiring. The tray menu now exposes the last 10 pinned clipboard items and restores clipboard contents using native clipboard copy; image restore reads stored PNG blobs and writes native image data via `arboard`.
 
 ## Database schema
 
@@ -122,5 +123,5 @@ Columns:
 - **Search & categorization**: Add full-text search, fuzzy match, and tag extraction.
 - **Soft-delete**: Add trash / undo flow and confirm deletion.
 - **Blob retrieval**: Add endpoint for fetching full-quality images (currently preview is in event, full PNG is in blobs table).
-- **Image-to-clipboard restore**: Add platform-specific native image copy (currently we copy preview data URL or hash string).
+- **Image-to-clipboard restore**: Tray menu image restore now supports native image copy from stored PNG blobs; frontend timeline image copy remains an area for further improvement.
 

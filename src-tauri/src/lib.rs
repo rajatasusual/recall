@@ -1,7 +1,6 @@
+use serde_json::Value;
 use tauri::{
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
+    tray::TrayIconBuilder, Emitter, EventLoopMessage, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_window_state::{Builder as WindowBuilder, StateFlags};
 use tracing_subscriber;
@@ -47,32 +46,13 @@ pub fn run() {
                 .title("Recall")
                 .decorations(true)
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
-                .shadow(false)
+                .shadow(true)
                 .hidden_title(true)
                 .center()
                 .inner_size(800.0, 600.0)
                 .build()?;
 
-            // tray icon setup
-            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&quit_i])?;
-
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => {
-                        println!("quit menu item was clicked");
-                        app.exit(0);
-                    }
-                    _ => {
-                        println!("menu item {:?} not handled", event.id);
-                    }
-                })
-                .build(app)?;
-
-            // Initialize database
+            // Initialize database first (needed for tray menu)
             let app_dir = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&app_dir)?;
 
@@ -83,6 +63,112 @@ pub fn run() {
 
             db.init_schema()
                 .expect("Failed to initialize database schema");
+
+            // tray icon setup with clipboard items
+
+            // Get recent clipboard items
+            let clipboard_items = db.get_recent_clipboard_items(10).unwrap_or_default();
+
+            let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+
+            // Build menu with clipboard items
+            let menu = if clipboard_items.is_empty() {
+                // No clipboard items - show placeholder
+                let no_items = tauri::menu::MenuItem::with_id(
+                    app,
+                    "no_clipboard",
+                    "No clipboard items",
+                    false,
+                    None::<&str>,
+                )?;
+
+                tauri::menu::Menu::with_items(app, &[&no_items, &quit_i])?
+            } else {
+                use tauri::menu::IsMenuItem;
+
+                let clip_items: Vec<tauri::menu::MenuItem<_>> = clipboard_items
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (_, payload_data))| {
+                        let id = format!("clipboard_{}", idx);
+
+                        // Parse JSON safely
+                        let text = serde_json::from_str::<Value>(payload_data)
+                            .ok()
+                            .and_then(|v| {
+                                v.get("content")
+                                    .and_then(|t| t.as_str())
+                                    .map(|s| s.to_string())
+                            })
+                            .unwrap_or_else(|| payload_data.clone()); // fallback
+
+                        let preview = if text.len() > 25 {
+                            format!("{}. {}...", idx + 1, &text[..22])
+                        } else {
+                            format!("{}. {}", idx + 1, &text)
+                        };
+
+                        tauri::menu::MenuItem::with_id(app, id, preview, true, None::<&str>)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                // Build trait-object vector
+                let mut item_refs: Vec<&dyn IsMenuItem<tauri_runtime_wry::Wry<EventLoopMessage>>> =
+                    clip_items
+                        .iter()
+                        .map(|item| item as &dyn IsMenuItem<_>)
+                        .collect();
+
+                item_refs.push(&quit_i);
+
+                tauri::menu::Menu::with_items(app, &item_refs)?
+            };
+
+            // Store clipboard items in app state for reference in menu event handler
+            let clipboard_items_clone = clipboard_items.clone();
+
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(move |app, event| {
+                    if event.id.as_ref() == "quit" {
+                        println!("quit menu item was clicked");
+                        app.exit(0);
+                    } else if event.id.as_ref().starts_with("clipboard_") {
+                        // Extract index from ID (clipboard_0, clipboard_1, etc.)
+                        if let Ok(idx) = event
+                            .id
+                            .as_ref()
+                            .strip_prefix("clipboard_")
+                            .unwrap_or("")
+                            .parse::<usize>()
+                        {
+                            if let Some((_, content)) = clipboard_items_clone.get(idx) {
+                                tracing::info!("Copying clipboard item {} to clipboard", idx);
+                                // Copy to system clipboard
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    // Parse JSON safely
+                                    let content = serde_json::from_str::<Value>(content)
+                                        .ok()
+                                        .and_then(|v| {
+                                            v.get("content")
+                                                .and_then(|t| t.as_str())
+                                                .map(|s| s.to_string())
+                                        })
+                                        .unwrap_or_else(|| content.clone()); // fallback
+
+                                    if let Err(e) = clipboard.set_text(content.clone()) {
+                                        tracing::error!("Failed to copy to clipboard: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        println!("menu item {:?} not handled", event.id);
+                    }
+                })
+                .build(app)?;
 
             // Initialize event writer
             let writer = std::sync::Arc::new(storage::EventWriter::new(
@@ -121,7 +207,7 @@ pub fn run() {
             commands::events::delete_event,
             commands::events::get_event_count,
             commands::events::test_insert_clipboard_event,
-            commands::events::delete_all_events,
+            commands::events::delete_all_events
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

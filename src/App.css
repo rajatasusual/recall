@@ -106,7 +106,7 @@ button:active {
 }
 
 select {
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid var(--select-border);
   padding: 10px 12px;
   background: var(--select-bg);
@@ -157,7 +157,7 @@ select {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--panel-border);
-  border-radius: 30px;
+  border-radius: 12px;
   backdrop-filter: blur(18px);
   overflow: hidden;
   margin-bottom: 20px;
@@ -206,7 +206,7 @@ select {
 .error-box {
   margin: 18px 28px 0;
   padding: 16px 18px;
-  border-radius: 18px;
+  border-radius: 12px;
   background: #fff0f2;
   border: 1px solid rgba(255, 55, 95, 0.22);
   color: #bf0020;
@@ -226,7 +226,7 @@ select {
   align-items: center;
   justify-content: center;
   min-height: 280px;
-  border-radius: 20px;
+  border-radius: 12px;
   color: var(--muted);
   font-size: 15px;
 }
@@ -240,7 +240,7 @@ select {
   display: grid;
   gap: 14px;
   padding: 18px 18px 16px;
-  border-radius: 24px;
+  border-radius: 12px;
   background: var(--item-bg);
   border: 1px solid var(--item-border);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.04);
@@ -269,7 +269,7 @@ select {
 
 .app-context {
   padding: 2px 6px;
-  border-radius: 8px;
+  border-radius: 12px;
   border: 1px solid var(--item-border);
 }
 

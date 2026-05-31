@@ -1,8 +1,8 @@
-use rusqlite::{Connection, params};
+use super::schema;
+use crate::storage::StorageResult;
+use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use crate::storage::StorageResult;
-use super::schema;
 
 /// Full event record with metadata
 #[derive(Debug, Clone)]
@@ -28,12 +28,12 @@ impl Database {
     /// Create or open a database at the given path
     pub fn open(path: impl AsRef<Path>) -> StorageResult<Self> {
         let conn = Connection::open(path)?;
-        
+
         // Enable WAL mode for crash safety
         conn.execute_batch("PRAGMA journal_mode = WAL;")?;
         conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
         conn.execute_batch("PRAGMA cache_size = -64000;")?; // 64MB cache
-        
+
         Ok(Database {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -75,7 +75,7 @@ impl Database {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
-        
+
         conn.execute(
             "INSERT INTO events (id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
@@ -121,7 +121,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at FROM events ORDER BY pinned DESC, timestamp DESC LIMIT 1000"
         )?;
-        
+
         let events = stmt.query_map([], |row| {
             Ok(EventRecord {
                 id: row.get(0)?,
@@ -145,7 +145,11 @@ impl Database {
     }
 
     /// Get events with optional filters (pinned_only, source_app)
-    pub fn get_events(&self, pinned_only: Option<bool>, source_app: Option<&str>) -> StorageResult<Vec<EventRecord>> {
+    pub fn get_events(
+        &self,
+        pinned_only: Option<bool>,
+        source_app: Option<&str>,
+    ) -> StorageResult<Vec<EventRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut sql = String::from("SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at FROM events");
         let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
@@ -230,14 +234,18 @@ impl Database {
     }
 
     /// Get events by timestamp range with full metadata
-    pub fn get_events_by_timestamp_range(&self, start_ms: i64, end_ms: i64) -> StorageResult<Vec<EventRecord>> {
+    pub fn get_events_by_timestamp_range(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> StorageResult<Vec<EventRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at FROM events 
              WHERE timestamp >= ? AND timestamp <= ? 
              ORDER BY timestamp DESC LIMIT 1000"
         )?;
-        
+
         let events = stmt.query_map(params![start_ms, end_ms], |row| {
             Ok(EventRecord {
                 id: row.get(0)?,
@@ -264,9 +272,9 @@ impl Database {
     pub fn get_all_events(&self) -> StorageResult<Vec<(String, i64, String)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, timestamp, payload_data FROM events ORDER BY timestamp DESC LIMIT 1000"
+            "SELECT id, timestamp, payload_data FROM events ORDER BY timestamp DESC LIMIT 1000",
         )?;
-        
+
         let events = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -285,9 +293,7 @@ impl Database {
     /// Count total events
     pub fn count_events(&self) -> StorageResult<i64> {
         let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |row| {
-            row.get(0)
-        })?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -357,7 +363,7 @@ impl Database {
              WHERE pinned = 1 
              ORDER BY timestamp DESC"
         )?;
-        
+
         let events = stmt.query_map([], |row| {
             Ok(EventRecord {
                 id: row.get(0)?,
@@ -379,6 +385,30 @@ impl Database {
         }
         Ok(result)
     }
+
+    /// Get recent clipboard events (text only, for tray menu)
+    /// Returns (id, payload_data preview) tuples
+    pub fn get_recent_clipboard_items(&self, limit: i64) -> StorageResult<Vec<(String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, payload_data FROM events 
+            WHERE pinned = 1
+            ORDER BY timestamp DESC 
+            LIMIT ?",
+        )?;
+
+        let items = stmt.query_map(params![limit], |row| {
+            let payload_data: String = row.get(1)?;
+            // Truncate to 50 chars for display
+            Ok((row.get(0)?, payload_data))
+        })?;
+
+        let mut result = Vec::new();
+        for item in items {
+            result.push(item?);
+        }
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
@@ -391,10 +421,10 @@ mod tests {
         let temp_file = NamedTempFile::new()?;
         let db = Database::open(temp_file.path())?;
         db.init_schema()?;
-        
+
         let count = db.count_events()?;
         assert_eq!(count, 0);
-        
+
         Ok(())
     }
 
@@ -417,7 +447,7 @@ mod tests {
 
         let count = db.count_events()?;
         assert_eq!(count, 1);
-        
+
         Ok(())
     }
 }

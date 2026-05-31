@@ -125,7 +125,7 @@ fn get_active_app_and_window() -> (Option<String>, Option<String>) {
 /// Process text from clipboard into ClipboardContent
 fn process_text(text: &str) -> Option<ClipboardContent> {
     let trimmed = text.trim();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed.starts_with("clipboard_") {
         return None;
     }
 

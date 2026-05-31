@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { EventRecord } from "../types";
@@ -27,6 +27,20 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   const [pinnedOnly, setPinnedOnly] = useState<boolean>(false);
   const [sourceAppFilter, setSourceAppFilter] = useState<string | null>(null);
   const [clickedBtn, setClickedBtn] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 1500);
+  };
+
   const loadEvents = async () => {
     setError(null);
     try {
@@ -44,15 +58,45 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
     }
   };
 
+  const mergeIncomingEvent = (newEvent: EventRecord) => {
+    if (pinnedOnly && !newEvent.pinned) {
+      return;
+    }
+    if (sourceAppFilter && newEvent.source_app !== sourceAppFilter) {
+      return;
+    }
+
+    setEvents((prevEvents) => {
+      if (prevEvents.some((event) => event.id === newEvent.id)) {
+        return prevEvents;
+      }
+
+      const insertAt = newEvent.pinned
+        ? 0
+        : prevEvents.findIndex((event) => !event.pinned);
+
+      if (insertAt === -1) {
+        return [...prevEvents, newEvent];
+      }
+
+      const next = [...prevEvents];
+      next.splice(insertAt, 0, newEvent);
+      return next;
+    });
+    setLastRefresh(new Date());
+  };
+
   useEffect(() => {
     // initial load and subscribe to backend 'events:new' for near-realtime updates
     let stop: () => void = () => {};
     (async () => {
       await loadEvents();
       try {
-        const unlisten = await listen("events:new", () => {
-          // refresh when a new event is ingested
-          loadEvents();
+        const unlisten = await listen("events:new", (event) => {
+          const payload = event.payload as unknown;
+          if (payload && typeof payload === "object") {
+            mergeIncomingEvent(payload as EventRecord);
+          }
         });
         stop = () => {
           try { unlisten(); } catch (e) { /* ignore */ }
@@ -130,6 +174,9 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
               {events.length} item{events.length !== 1 ? "s" : ""}
             </span>
             <span class="last-refresh" style="font-size:12px;color:var(--muted);margin-left:8px">Last: {lastRefresh.toLocaleTimeString()}</span>
+            {toastMessage && (
+              <span class="toast">{toastMessage}</span>
+            )}
           </div>
         </div>
       </div>
@@ -186,6 +233,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
                           await copyToClipboard(String(content));
                           setClickedBtn(`${event.id}:copy`);
                           setTimeout(() => setClickedBtn(null), 420);
+                          showToast("Copied");
                         } catch (err) {
                           console.error("Failed to copy to clipboard:", err);
                         }

@@ -24,8 +24,8 @@ Backend (Tauri/Rust)
 - Database file: stored in the platform app data directory as `events.db` (SQLite, WAL mode).
 - Main backend modules:
   - `core` — event model (`Event`), payloads and helpers
-  - `sources` — clipboard polling and capture (captures app name + window title on macOS)
-  - `storage` — DB wrapper, schema, and batched EventWriter
+  - `sources` — clipboard polling with `arboard` and capture; runs in a fast, non-blocking background task and captures app/window context on macOS
+  - `storage` — DB wrapper, schema, and batched EventWriter; emits `events:new` to the frontend on new inserts
   - `commands` — Tauri command handlers invoked by the frontend
 
 Available Tauri commands (invoke)
@@ -39,14 +39,18 @@ Available Tauri commands (invoke)
 - `get_event_count()`
 - `test_insert_clipboard_event(content)` — test helper
 
+Realtime event flow:
+- frontend listens for `events:new` and merges newly ingested clipboard events into state without a full refresh
+
 Frontend (src)
 
 - Preact + TypeScript UI lives in `src/` and components are under `src/components/`.
-- `EventTimeline` is the main view: supports filtering by pinned and by application, pin/unpin, delete, copy back to clipboard.
+- `EventTimeline` is the main view: supports filtering by pinned and by application, pin/unpin, delete, copy back to clipboard, and shows a small toast on copy.
 
 Design notes
 
-- Deduplication: clipboard text is hashed (MD5) and stored as `content_hash` in the DB; duplicate prevention happens both in-memory (last seen hash) and by consulting the DB before inserting.
+- Deduplication: clipboard text is hashed (xxHash64) and stored as `content_hash` in the DB; duplicate prevention happens both in-memory (last seen hash) and by consulting the DB before inserting.
+- Polling: system clipboard polling uses `arboard` inside `tokio::task::spawn_blocking(...)` with a `tokio::time::interval` ticker so clipboard reads stay fast and non-blocking.
 - Pinning: `pinned` is a boolean column; pinned items are ordered to the top in queries.
 - Context: `source_app` and `window_title` (macOS) are captured per event where available.
 

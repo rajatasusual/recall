@@ -13,7 +13,7 @@ High-level components
 
 - Backend (Rust/Tauri)
   - `core` — `Event` struct and `EventPayload` enum. Key fields: `id`, `timestamp`, `source`, `payload`, `window_title`, `source_app`, `pinned`.
-  - `sources` — clipboard watcher (`sources/clipboard.rs`) polls the system clipboard, computes an MD5 `content_hash`, captures context (frontmost app and window title on macOS via `osascript`), and submits events to `EventWriter`.
+  - `sources` — clipboard watcher (`sources/clipboard.rs`) polls the system clipboard using `arboard`, computes an xxHash64 `content_hash`, captures context (frontmost app and window title on macOS via `osascript`), and submits events to `EventWriter` using a fast non-blocking task.
   - `storage` — DB layer (`db.rs`) and schema (`schema.rs`) manage `events` and `edges` tables. `EventWriter` batches writes for efficiency and creates temporal edges between consecutive events.
   - `commands` — Tauri-invokable handlers that map to storage operations (get, filter, pin/unpin, delete).
 
@@ -27,7 +27,7 @@ Columns added/used:
 - `payload_data` TEXT (JSON serialized payload)
 - `window_title` TEXT
 - `source_app` TEXT
-- `content_hash` TEXT (MD5 of text content)
+- `content_hash` TEXT (xxHash64 of text content)
 - `pinned` INTEGER (0/1)
 - `created_at` INTEGER (insert time ms)
 
@@ -40,16 +40,17 @@ Indexes:
 Event flow
 
 1. Clipboard watcher polls clipboard (default 400ms).
-2. If text found, compute MD5 `content_hash` and perform a quick compare with the last-seen hash to avoid rapid duplicates.
+2. If text found, compute xxHash64 `content_hash` and perform a quick compare with the last-seen hash to avoid rapid duplicates.
 3. Query DB via `content_exists(content_hash)` — if exists, skip storing; otherwise create an `Event` with captured context and queue it to `EventWriter`.
-4. `EventWriter` batches writes and flushes them into SQLite; it also inserts simple `temporal_next` edges linking consecutive events.
-5. Frontend invokes Tauri commands to list, filter, pin/unpin, delete, and restore clipboard entries.
+4. `EventWriter` batches writes and flushes them into SQLite; it also inserts simple `temporal_next` edges linking consecutive events and emits `events:new` to the frontend on new inserts.
+5. The frontend listens for `events:new` and merges incoming events into local state, avoiding a full list refresh when new clipboard items arrive.
+6. Frontend invokes Tauri commands to list, filter, pin/unpin, delete, and restore clipboard entries.
 
 Deduplication rules
 
 - In-memory: `last_hash` prevents immediate duplicates on the same runtime loop.
 - Persistent: `content_hash` prevents inserting duplicates already stored in DB (useful across restarts).
-- Hashing is MD5 over the trimmed text content. (You can swap to SHA256 if desired.)
+- Hashing is xxHash64 over the trimmed text content. (You can swap to SHA256 if desired.)
 
 Pinning & Ordering
 

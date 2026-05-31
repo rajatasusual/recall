@@ -1,4 +1,5 @@
 use tauri::State;
+use xxhash_rust::xxh3::xxh3_64;
 use std::sync::Arc;
 use crate::storage::{Database, db::EventRecord};
 use crate::core::{Event, EventSource, EventPayload};
@@ -100,12 +101,12 @@ pub fn test_insert_clipboard_event(
         EventPayload::ClipboardText {
             content: content.clone(),
             is_truncated: false,
-            content_hash: format!("{:x}", md5::compute(content.as_bytes())),
+            content_hash: format!("{:x}", xxh3_64(content.as_bytes())),
         },
     );
     
     let event_id = event.id.clone();
-    let content_hash = format!("{:x}", md5::compute(content.as_bytes()));
+    let content_hash = format!("{:x}", xxh3_64(content.as_bytes()));
     
     db.insert_event(
         &event.id,

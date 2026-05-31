@@ -1,12 +1,13 @@
 use crate::core::{Event, EventPayload, EventSource};
 use crate::storage::EventWriter;
-use copypasta::{ClipboardContext, ClipboardProvider};
+use arboard::Clipboard;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
-use tokio::time::sleep;
 use tracing::{error, warn};
+use xxhash_rust::xxh3::xxh3_64;
 
-const CLIPBOARD_POLL_INTERVAL_MS: u64 = 400;
+const CLIPBOARD_POLL_INTERVAL_MS: u64 = 150;
 const MAX_CLIPBOARD_PAYLOAD_BYTES: usize = 50 * 1024;
 const CLIPBOARD_PREVIEW_CHARS: usize = 2048;
 
@@ -14,137 +15,182 @@ const CLIPBOARD_PREVIEW_CHARS: usize = 2048;
 #[cfg(target_os = "macos")]
 fn get_active_app_and_window() -> (Option<String>, Option<String>) {
     use std::process::Command;
-    // Use AppleScript to get the frontmost app and window title
+
     let app_name = Command::new("osascript")
         .arg("-e")
-        .arg("tell application \"System Events\" to return name of first application process whose frontmost is true")
+        .arg(
+            "tell application \"System Events\" \
+             to return name of first application process whose frontmost is true",
+        )
         .output()
         .ok()
-        .and_then(|o| if o.status.success() {
-            Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-        } else { None })
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
         .filter(|s| !s.is_empty());
 
     let window_title = Command::new("osascript")
         .arg("-e")
-        .arg("tell application \"System Events\" to tell first application process whose frontmost is true to try\n  return value of attribute \"AXTitle\" of front window\non error\n  return \"\"\nend try")
+        .arg(
+            "tell application \"System Events\" \
+             to tell first application process whose frontmost is true \
+             to try
+                return value of attribute \"AXTitle\" of front window
+             on error
+                return \"\"
+             end try",
+        )
         .output()
         .ok()
-        .and_then(|o| if o.status.success() {
-            Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-        } else { None })
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
         .filter(|s| !s.is_empty());
 
     (app_name, window_title)
 }
 
-/// Get the current active application name and window title (fallback for other platforms)
+/// Fallback for non-macOS platforms.
 #[cfg(not(target_os = "macos"))]
 fn get_active_app_and_window() -> (Option<String>, Option<String>) {
     (None, None)
 }
 
-pub async fn start_clipboard_watcher(writer: Arc<EventWriter>, interval_ms: u64) {
-    let interval = Duration::from_millis(interval_ms.max(CLIPBOARD_POLL_INTERVAL_MS));
+pub async fn start_clipboard_watcher(
+    writer: Arc<EventWriter>,
+    interval_ms: u64,
+) {
+    let poll_interval =
+        Duration::from_millis(interval_ms.max(CLIPBOARD_POLL_INTERVAL_MS));
 
-    let mut clipboard = match ClipboardContext::new() {
-        Ok(ctx) => ctx,
-        Err(err) => {
-            error!(
-                "clipboard_watch_error: failed to initialize clipboard: {}",
-                err
-            );
-            return;
-        }
-    };
+    thread::spawn(move || {
+        let mut clipboard = match Clipboard::new() {
+            Ok(c) => c,
+            Err(err) => {
+                error!(
+                    "clipboard_watch_error: failed to initialize clipboard: {}",
+                    err
+                );
+                return;
+            }
+        };
 
-    let mut last_hash: Option<String> = None;
+        let mut last_hash: Option<u64> = None;
 
-    loop {
-        match clipboard.get_contents() {
-            Ok(contents) => {
-                let trimmed = contents.trim().to_string();
-                if !trimmed.is_empty() {
-                    {
-                        let content_hash = format!("{:x}", md5::compute(trimmed.as_bytes()));
+        loop {
+            match clipboard.get_text() {
+                Ok(contents) => {
+                    let trimmed = contents.trim();
 
-                        if last_hash.as_deref() != Some(&content_hash) {
-                            let (stored_content, is_truncated) =
-                                if trimmed.as_bytes().len() > MAX_CLIPBOARD_PAYLOAD_BYTES {
-                                    let preview: String =
-                                        trimmed.chars().take(CLIPBOARD_PREVIEW_CHARS).collect();
-                                    (preview, true)
-                                } else {
-                                    (trimmed.clone(), false)
-                                };
+                    if trimmed.is_empty() {
+                        thread::sleep(poll_interval);
+                        continue;
+                    }
 
-                            // Capture application context
-                            let (source_app, window_title) = get_active_app_and_window();
+                    let content_hash = xxh3_64(trimmed.as_bytes());
 
-                            // Check DB deduplication first (persisted duplicates)
-                            match writer.content_exists(&content_hash) {
-                                Ok(true) => {
-                                    // Already stored in DB; update last_hash and skip
-                                    last_hash = Some(content_hash);
-                                }
-                                Ok(false) => {
-                                    let event = Event::new(
-                                        EventSource::Clipboard,
-                                        EventPayload::ClipboardText {
-                                            content: stored_content,
-                                            is_truncated,
-                                            content_hash: content_hash.clone(),
-                                        },
-                                    )
-                                    .with_context(window_title, source_app);
+                    if last_hash == Some(content_hash) {
+                        thread::sleep(poll_interval);
+                        continue;
+                    }
 
-                                    if let Err(err) = writer.write_event(event) {
-                                        warn!(
-                                            "clipboard_event_dropped: reason={} content_hash={}",
-                                            err, content_hash
-                                        );
-                                    }
+                    let (stored_content, is_truncated) =
+                        if trimmed.as_bytes().len() > MAX_CLIPBOARD_PAYLOAD_BYTES {
+                            (
+                                trimmed
+                                    .chars()
+                                    .take(CLIPBOARD_PREVIEW_CHARS)
+                                    .collect::<String>(),
+                                true,
+                            )
+                        } else {
+                            (trimmed.to_owned(), false)
+                        };
 
-                                    last_hash = Some(content_hash);
-                                }
-                                Err(e) => {
-                                    // On DB error, fallback to enqueueing the event
-                                    warn!("clipboard_dedup_check_failed: {}", e);
-                                    let event = Event::new(
-                                        EventSource::Clipboard,
-                                        EventPayload::ClipboardText {
-                                            content: stored_content,
-                                            is_truncated,
-                                            content_hash: content_hash.clone(),
-                                        },
-                                    )
-                                    .with_context(window_title, source_app);
+                    let hash_string = format!("{content_hash:016x}");
 
-                                    if let Err(err) = writer.write_event(event) {
-                                        warn!(
-                                            "clipboard_event_dropped: reason={} content_hash={}",
-                                            err, content_hash
-                                        );
-                                    }
+                    let (source_app, window_title) =
+                        get_active_app_and_window();
 
-                                    last_hash = Some(content_hash);
-                                }
+                    match writer.content_exists(&hash_string) {
+                        Ok(true) => {
+                            last_hash = Some(content_hash);
+                        }
+
+                        Ok(false) => {
+                            let event = Event::new(
+                                EventSource::Clipboard,
+                                EventPayload::ClipboardText {
+                                    content: stored_content,
+                                    is_truncated,
+                                    content_hash: hash_string.clone(),
+                                },
+                            )
+                            .with_context(window_title, source_app);
+
+                            if let Err(err) = writer.write_event(event) {
+                                warn!(
+                                    "clipboard_event_dropped: reason={} content_hash={}",
+                                    err,
+                                    hash_string
+                                );
                             }
+
+                            last_hash = Some(content_hash);
+                        }
+
+                        Err(err) => {
+                            warn!(
+                                "clipboard_dedup_check_failed: {}",
+                                err
+                            );
+
+                            let event = Event::new(
+                                EventSource::Clipboard,
+                                EventPayload::ClipboardText {
+                                    content: stored_content,
+                                    is_truncated,
+                                    content_hash: hash_string.clone(),
+                                },
+                            )
+                            .with_context(window_title, source_app);
+
+                            if let Err(write_err) = writer.write_event(event) {
+                                warn!(
+                                    "clipboard_event_dropped: reason={} content_hash={}",
+                                    write_err,
+                                    hash_string
+                                );
+                            }
+
+                            last_hash = Some(content_hash);
                         }
                     }
                 }
-            }
-            Err(err) => {
-                // On macOS the pasteboard may not contain a string type for some events
-                // (e.g. images or rich types). Treat the specific NSPasteboard message as
-                // non-fatal and log at debug level to avoid noisy errors in logs.
-                let msg = err.to_string();
-                if !(msg.contains("NSPasteboard#types") || msg.contains("NSPasteboardTypeString")) {
-                    error!("clipboard_watch_error: failed to read clipboard: {}", err);                    
+
+                Err(err) => {
+                    let msg = err.to_string();
+
+                    if !(msg.contains("NSPasteboard#types")
+                        || msg.contains("NSPasteboardTypeString"))
+                    {
+                        error!(
+                            "clipboard_watch_error: failed to read clipboard: {}",
+                            err
+                        );
+                    }
                 }
             }
-        }
 
-        sleep(interval).await;
-    }
+            thread::sleep(poll_interval);
+        }
+    });
 }

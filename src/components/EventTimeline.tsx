@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { EventRecord } from "../types";
-import "../styles/EventTimeline.css";
 
 const copyToClipboard = async (text: string) => {
   // prefer the web clipboard when available

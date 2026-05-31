@@ -13,14 +13,6 @@
   "app": {
     "withGlobalTauri": true,
     "windows": [
-      {
-        "label": "main",
-        "title": "Recall",
-        "minWidth": 440,
-        "minHeight": 560,
-        "decorations": false,
-        "transparent": true
-      }
     ],
     "macOSPrivateApi": true,
     "security": {

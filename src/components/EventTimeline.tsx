@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { EventRecord } from "../types";
 
-const copyToClipboard = async (text: string) => {
+const copyTextToClipboard = async (text: string) => {
   // prefer the web clipboard when available
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
@@ -14,6 +14,20 @@ const copyToClipboard = async (text: string) => {
     // fall through to tauri fallback
   }
 };
+
+const copyImageToClipboard = async (dataUrl: string) => {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.write) {
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const item = new ClipboardItem({ [blob.type]: blob });
+      await navigator.clipboard.write([item]);
+      return;
+    }
+  } catch (e) {
+    // fall through to tauri fallback
+  }
+}
 
 interface EventTimelineProps {
   refreshInterval?: number;
@@ -257,10 +271,13 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
                         let content: string;
                         if (event.payload.type === "clipboard_image") {
                           content = event.payload.preview ?? event.content_hash ?? JSON.stringify(event.payload);
+                          await copyImageToClipboard(content);
+
                         } else {
                           content = event.payload?.content ?? JSON.stringify(event.payload);
+                          await copyTextToClipboard(String(content));
+
                         }
-                        await copyToClipboard(String(content));
                         setClickedBtn(`${event.id}:copy`);
                         setTimeout(() => setClickedBtn(null), 420);
                         showToast("Copied");

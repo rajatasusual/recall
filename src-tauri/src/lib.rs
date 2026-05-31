@@ -1,3 +1,4 @@
+use arboard::{Clipboard, ImageData};
 use serde_json::Value;
 use tauri::{
     tray::TrayIconBuilder, Emitter, EventLoopMessage, Manager, WebviewUrl, WebviewWindowBuilder,
@@ -14,6 +15,75 @@ pub mod storage;
 struct SingleInstancePayload {
     args: Vec<String>,
     cwd: String,
+}
+
+/// Helper function to copy an event's content to clipboard (handles both text and images)
+fn copy_event_to_clipboard(
+    event: &storage::db::EventRecord,
+    db: &std::sync::Arc<storage::Database>,
+) {
+    // Determine if this is an image or text
+    let is_image = event.payload_type.contains("image");
+
+    if is_image {
+        // For images, extract content_hash and fetch the binary data from blobs
+        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload_data) {
+            if let Some(content_hash) = payload.get("content_hash").and_then(|v| v.as_str()) {
+                if let Ok(Some((_mime, data))) = db.get_blob(content_hash) {
+                    match Clipboard::new() {
+                        Ok(mut clipboard) => {
+                            // Decode image bytes into a format usable by arboard
+                            // NOTE: arboard expects raw RGBA, not encoded PNG/JPEG
+                            if let Ok(img) = image::load_from_memory(&data) {
+                                let rgba = img.to_rgba8();
+                                let (width, height) = rgba.dimensions();
+                                let image = ImageData {
+                                    width: width as usize,
+                                    height: height as usize,
+                                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
+                                };
+
+                                if clipboard.set_image(image).is_ok() {
+                                    tracing::info!("Image copied to clipboard");
+                                } else {
+                                    tracing::error!("Failed to set image in clipboard");
+                                }
+                            } else {
+                                tracing::error!("Failed to decode image bytes");
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Clipboard init failed: {}", e);
+                        }
+                    }
+                } else {
+                    tracing::warn!("Image blob not found for content_hash: {}", content_hash);
+                }
+            }
+        }
+    } else {
+        // For text items, extract the "content" field
+        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload_data) {
+            let text_content = payload
+                .get("content")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    // Fallback to the whole payload if "content" field doesn't exist
+                    event.payload_data.clone()
+                });
+
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if let Err(e) = clipboard.set_text(text_content) {
+                    tracing::error!("Failed to copy text to clipboard: {}", e);
+                } else {
+                    tracing::info!("Text copied to clipboard successfully");
+                }
+            }
+        } else {
+            tracing::error!("Failed to parse event payload as JSON");
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -67,7 +137,7 @@ pub fn run() {
             // tray icon setup with clipboard items
 
             // Get recent clipboard items
-            let clipboard_items = db.get_recent_clipboard_items(10).unwrap_or_default();
+            let clipboard_items = db.get_pinned_events().unwrap_or_default();
 
             let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
@@ -89,18 +159,22 @@ pub fn run() {
                 let clip_items: Vec<tauri::menu::MenuItem<_>> = clipboard_items
                     .iter()
                     .enumerate()
-                    .map(|(idx, (_, payload_data))| {
+                    .map(|(idx, rec)| {
                         let id = format!("clipboard_{}", idx);
 
                         // Parse JSON safely
-                        let text = serde_json::from_str::<Value>(payload_data)
+                        let text = serde_json::from_str::<Value>(&rec.payload_data)
                             .ok()
                             .and_then(|v| {
                                 v.get("content")
                                     .and_then(|t| t.as_str())
                                     .map(|s| s.to_string())
                             })
-                            .unwrap_or_else(|| payload_data.clone()); // fallback
+                            .unwrap_or_else(|| match rec.source_app.as_deref() {
+                                Some(source) => format!("Image | {}", source),
+
+                                None => rec.payload_type.clone(),
+                            });
 
                         let preview = if text.len() > 25 {
                             format!("{}. {}...", idx + 1, &text[..22])
@@ -127,6 +201,9 @@ pub fn run() {
             // Store clipboard items in app state for reference in menu event handler
             let clipboard_items_clone = clipboard_items.clone();
 
+            // Clone db for the menu event handler
+            let db_for_menu = db.clone();
+
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -144,24 +221,9 @@ pub fn run() {
                             .unwrap_or("")
                             .parse::<usize>()
                         {
-                            if let Some((_, content)) = clipboard_items_clone.get(idx) {
+                            if let Some(rec) = clipboard_items_clone.get(idx) {
                                 tracing::info!("Copying clipboard item {} to clipboard", idx);
-                                // Copy to system clipboard
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    // Parse JSON safely
-                                    let content = serde_json::from_str::<Value>(content)
-                                        .ok()
-                                        .and_then(|v| {
-                                            v.get("content")
-                                                .and_then(|t| t.as_str())
-                                                .map(|s| s.to_string())
-                                        })
-                                        .unwrap_or_else(|| content.clone()); // fallback
-
-                                    if let Err(e) = clipboard.set_text(content.clone()) {
-                                        tracing::error!("Failed to copy to clipboard: {}", e);
-                                    }
-                                }
+                                copy_event_to_clipboard(&rec, &db_for_menu);
                             }
                         }
                     } else {

@@ -386,29 +386,6 @@ impl Database {
         Ok(result)
     }
 
-    /// Get recent clipboard events (text only, for tray menu)
-    /// Returns (id, payload_data preview) tuples
-    pub fn get_recent_clipboard_items(&self, limit: i64) -> StorageResult<Vec<(String, String)>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, payload_data FROM events 
-            WHERE pinned = 1
-            ORDER BY timestamp DESC 
-            LIMIT ?",
-        )?;
-
-        let items = stmt.query_map(params![limit], |row| {
-            let payload_data: String = row.get(1)?;
-            // Truncate to 50 chars for display
-            Ok((row.get(0)?, payload_data))
-        })?;
-
-        let mut result = Vec::new();
-        for item in items {
-            result.push(item?);
-        }
-        Ok(result)
-    }
 }
 
 #[cfg(test)]

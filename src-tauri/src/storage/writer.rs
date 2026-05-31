@@ -197,9 +197,18 @@ impl EventWriter {
     fn insert_event_record(db: &Arc<Database>, event: &Event) -> StorageResult<()> {
         let payload_data = serde_json::to_string(&event.payload)?;
         
-        // Extract content_hash from payload
+        // Extract content_hash from payload and persist any binary blobs
         let content_hash = match &event.payload {
             crate::core::EventPayload::ClipboardText { content_hash, .. } => {
+                Some(content_hash.as_str())
+            }
+            crate::core::EventPayload::ClipboardImage { content_hash, mime, data, .. } => {
+                if let Some(bytes) = data {
+                    // persist blob (best-effort)
+                    if let Err(e) = db.insert_blob(content_hash, mime, bytes) {
+                        warn!("failed_to_insert_blob: {}", e);
+                    }
+                }
                 Some(content_hash.as_str())
             }
         };

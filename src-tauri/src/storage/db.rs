@@ -84,6 +84,22 @@ impl Database {
         Ok(())
     }
 
+    /// Insert a binary blob (e.g., image) referenced by content_hash
+    pub fn insert_blob(&self, content_hash: &str, mime: &str, data: &[u8]) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        conn.execute(
+            "INSERT OR IGNORE INTO blobs (content_hash, mime, data, created_at) VALUES (?, ?, ?, ?)",
+            params![content_hash, mime, data, now],
+        )?;
+
+        Ok(())
+    }
+
     /// Insert an edge in the graph
     pub fn insert_edge(
         &self,
@@ -271,12 +287,39 @@ impl Database {
     /// Check if content hash already exists (for deduplication)
     pub fn content_exists(&self, content_hash: &str) -> StorageResult<bool> {
         let conn = self.conn.lock().unwrap();
-        let exists: i64 = conn.query_row(
+        // check both events and blobs for existing content
+        let exists_events: i64 = conn.query_row(
             "SELECT COUNT(*) FROM events WHERE content_hash = ?",
             params![content_hash],
-            |row| row.get(0)
+            |row| row.get(0),
         )?;
-        Ok(exists > 0)
+
+        if exists_events > 0 {
+            return Ok(true);
+        }
+
+        let exists_blobs: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM blobs WHERE content_hash = ?",
+            params![content_hash],
+            |row| row.get(0),
+        )?;
+
+        Ok(exists_blobs > 0)
+    }
+
+    /// Retrieve a blob by content_hash
+    pub fn get_blob(&self, content_hash: &str) -> StorageResult<Option<(String, Vec<u8>)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT mime, data FROM blobs WHERE content_hash = ?")?;
+        let mut rows = stmt.query(params![content_hash])?;
+
+        if let Some(row) = rows.next()? {
+            let mime: String = row.get(0)?;
+            let data: Vec<u8> = row.get(1)?;
+            Ok(Some((mime, data)))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Pin an event

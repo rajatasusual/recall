@@ -65,12 +65,21 @@ pub enum EventPayload {
         is_truncated: bool,
         content_hash: String,
     },
+    ClipboardImage {
+        content_hash: String,
+        mime: String,
+        preview: Option<String>,
+        #[serde(skip_serializing)]
+        #[serde(default)]
+        data: Option<Vec<u8>>,
+    },
 }
 
 impl EventPayload {
     pub fn payload_type(&self) -> &'static str {
         match self {
             EventPayload::ClipboardText { .. } => "clipboard_text",
+            EventPayload::ClipboardImage { .. } => "clipboard_image",
         }
     }
 }

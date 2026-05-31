@@ -135,6 +135,11 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
     setSourceAppFilter(select.value || null);
   };
   const getPayloadPreview = (payload: Record<string, any>): string => {
+    if (payload.type === "clipboard_image") {
+      // payload.preview should be a data URL (small PNG)
+      return payload.preview || "[image]";
+    }
+
     if (payload.content) {
       return payload.content.substring(0, 80);
     }
@@ -209,8 +214,19 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
                   </div>
                 </div>
                 <div class="event-content">
-                  {getPayloadPreview(event.payload)}
-                  {event.payload.content && event.payload.content.length > 80 && "..."}
+                  {event.payload.type === "clipboard_image" ? (
+                    event.payload.preview ? (
+                      // render small preview image
+                      <img src={event.payload.preview} alt="clipboard" style="max-width:240px;max-height:240px;border-radius:6px" />
+                    ) : (
+                      <span>[image]</span>
+                    )
+                  ) : (
+                    <>
+                      {getPayloadPreview(event.payload)}
+                      {event.payload.content && event.payload.content.length > 80 && "..."}
+                    </>
+                  )}
                 </div>
                 <div class="event-actions">
                     <button
@@ -228,7 +244,12 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
                       class={`copy-btn ${clickedBtn === `${event.id}:copy` ? 'clicked' : ''}`}
                       onClick={async () => {
                         try {
-                          const content = event.payload?.content ?? JSON.stringify(event.payload);
+                          let content: string;
+                          if (event.payload.type === "clipboard_image") {
+                            content = event.payload.preview ?? event.content_hash ?? JSON.stringify(event.payload);
+                          } else {
+                            content = event.payload?.content ?? JSON.stringify(event.payload);
+                          }
                           await copyToClipboard(String(content));
                           setClickedBtn(`${event.id}:copy`);
                           setTimeout(() => setClickedBtn(null), 420);

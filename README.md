@@ -1,10 +1,10 @@
-Recall — Intelligent Clipboard
+# Recall — Intelligent Clipboard
 
-Brief
+## Brief
 
-Recall captures clipboard items, stores them locally, and provides a small Tauri + Preact UI to browse, pin, filter and restore clipboard entries.
+Recall captures clipboard items (text and images), stores them locally, and provides a small Tauri + Preact UI to browse, pin, filter and restore clipboard entries. Images are automatically encoded to PNG, deduplicated by content hash, and displayed with preview thumbnails in the timeline.
 
-Quick start (development)
+## Quick start (development)
 
 - Install dependencies and start the web UI/dev server:
 
@@ -19,7 +19,7 @@ npm run dev
 npm run tauri dev
 ```
 
-Backend (Tauri/Rust)
+### Backend (Tauri/Rust)
 
 - Database file: stored in the platform app data directory as `events.db` (SQLite, WAL mode).
 - Main backend modules:
@@ -28,7 +28,7 @@ Backend (Tauri/Rust)
   - `storage` — DB wrapper, schema, and batched EventWriter; emits `events:new` to the frontend on new inserts
   - `commands` — Tauri command handlers invoked by the frontend
 
-Available Tauri commands (invoke)
+### Available Tauri commands (invoke)
 
 - `get_events(pinned_only?: boolean, source_app?: string)` — returns events, filters optional
 - `get_all_events()` — returns recent events (legacy)
@@ -39,33 +39,36 @@ Available Tauri commands (invoke)
 - `get_event_count()`
 - `test_insert_clipboard_event(content)` — test helper
 
-Realtime event flow:
+## Realtime event flow:
 - frontend listens for `events:new` and merges newly ingested clipboard events into state without a full refresh
 
 Frontend (src)
 
 - Preact + TypeScript UI lives in `src/` and components are under `src/components/`.
 - `EventTimeline` is the main view: supports filtering by pinned and by application, pin/unpin, delete, copy back to clipboard, and shows a small toast on copy.
+- **Image preview**: When an event payload type is `clipboard_image`, the UI renders an inline image preview (max 240×240px) sourced from the preview data URL stored in the event.
 
-Design notes
+## Design notes
 
-- Deduplication: clipboard text is hashed (xxHash64) and stored as `content_hash` in the DB; duplicate prevention happens both in-memory (last seen hash) and by consulting the DB before inserting.
-- Polling: system clipboard polling uses `arboard` inside `tokio::task::spawn_blocking(...)` with a `tokio::time::interval` ticker so clipboard reads stay fast and non-blocking.
-- Pinning: `pinned` is a boolean column; pinned items are ordered to the top in queries.
-- Context: `source_app` and `window_title` (macOS) are captured per event where available.
+- **Deduplication**: Clipboard content is hashed (xxHash64) and stored as `content_hash` in the DB. Both text and image payloads are deduplicated; duplicate prevention happens both in-memory (last seen hash) and by consulting the DB before inserting.
+- **Image handling**: When clipboard text is empty, the watcher attempts to read image data. Images are encoded to PNG, a full-quality PNG is stored in the `blobs` table, and a resized preview (max 512×512px, encoded as base64 data URL) is included in the event payload for quick UI rendering.
+- **Polling**: System clipboard polling uses `arboard` inside a fast, non-blocking background task with a configurable interval (default 150ms), so clipboard reads stay responsive.
+- **Pinning**: `pinned` is a boolean column; pinned items are ordered to the top in queries.
+- **Context**: `source_app` and `window_title` (macOS) are captured per event where available.
 
-Where to look
+## Where to look
 
 - Backend: `src-tauri/src/`
 - Frontend: `src/components/EventTimeline.tsx`, `src/styles/EventTimeline.css`
 - DB schema: `src-tauri/src/storage/schema.rs`
 
-Next steps (ideas)
+## Next steps (ideas)
 
 - Add soft-delete / trash with undo
 - Add search and tag extraction
-- Add richer content types (images, files)
+- Add more content types (files, rich text formatting)
+- Add blob retrieval endpoint for full-quality image downloads
+- Improve clipboard image-to-clipboard restore (platform-specific native image copy)
 
-License
-
-- (Add your license here)
+## License
+MIT

@@ -28,6 +28,20 @@ pub fn init(conn: &Connection) -> StorageResult<()> {
         "#,
     )?;
 
+    // Table to store binary blobs (images, attachments) referenced by content_hash
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS blobs (
+            content_hash TEXT PRIMARY KEY,
+            mime TEXT NOT NULL,
+            data BLOB NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_blobs_content_hash ON blobs(content_hash);
+        "#,
+    )?;
+
     // Create edges table for graph relationships
     conn.execute_batch(
         r#"

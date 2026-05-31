@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ui:dev",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": "."
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "ready in|compiled successfully|Local:"
+        }
+      },
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared"
+      }
+    }, 
+    {
+      "label": "ui:kill",
+      "type": "shell",
+      "command": "pkill",
+      "args": ["-f", "npm run dev"],
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared"
+      }
+    }
+  ]
+}

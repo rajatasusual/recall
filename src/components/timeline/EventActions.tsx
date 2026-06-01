@@ -40,7 +40,7 @@ export function EventActions({
         onClick={() => handleClick("copy", () => onCopy(event))}
         title="Copy to clipboard"
       >
-        Copy
+        📋
       </button>
 
       <button

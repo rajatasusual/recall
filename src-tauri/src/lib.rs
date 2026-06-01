@@ -144,7 +144,7 @@ pub fn run() {
                         .with_shortcuts(["CmdOrCtrl+Q"])?
                         .with_handler(|app, shortcut, event| {
                             if event.state == ShortcutState::Pressed {
-                                println!("Global shortcut triggered: {shortcut}");
+                                tracing::info!("Global shortcut triggered: {shortcut}");
                                 app.exit(0);
                             }
                         })
@@ -181,7 +181,7 @@ pub fn run() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| {
                     if event.id.as_ref() == "quit" {
-                        println!("quit menu item was clicked");
+                        tracing::info!("quit menu item was clicked");
                         app.exit(0);
                     } else if event.id.as_ref().starts_with("clipboard_") {
                         // Extract index from ID (clipboard_0, clipboard_1, etc.)
@@ -200,7 +200,7 @@ pub fn run() {
                             }
                         }
                     } else {
-                        println!("menu item {:?} not handled", event.id);
+                        tracing::info!("menu item {:?} not handled", event.id);
                     }
                 })
                 .build(app)?;

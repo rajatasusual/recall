@@ -18,7 +18,6 @@ use std::time::Duration;
 use tauri::{AppHandle, EventLoopMessage, Runtime};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_runtime_wry::Wry;
-use tracing::{error, warn};
 use xxhash_rust::xxh3::xxh3_64;
 
 /// Result of processing clipboard content
@@ -224,7 +223,7 @@ fn emit_content(
             // Either not found or dedup check failed; emit the event
             let event = content.to_event(source_app, window_title);
             if let Err(err) = writer.write_event(event) {
-                warn!(
+                tracing::warn!(
                     "clipboard_event_dropped: reason={} content_hash={}",
                     err, content_hash
                 );
@@ -300,7 +299,7 @@ pub async fn start_clipboard_watcher(
                                 && !msg.contains("NSPasteboardTypeString")
                                 && !msg.contains("NSPasteboard#types")
                             {
-                                error!("clipboard_watch_error: failed to read clipboard: {}", err);
+                                tracing::error!("clipboard_watch_error: failed to read clipboard: {}", err);
                             }
 
                             last_hash = None;

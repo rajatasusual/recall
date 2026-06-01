@@ -7,7 +7,6 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::time::{interval, Duration};
-use tracing::{debug, error, info, warn};
 
 /// Event writer with batching and backpressure
 #[derive(Clone)]
@@ -50,14 +49,14 @@ impl EventWriter {
                 if let Err(e) =
                     Self::writer_task(db_clone, receiver, config_clone, emitter_clone).await
                 {
-                    error!("Event writer task failed: {}", e);
+                    tracing::error!("Event writer task failed: {}", e);
                 }
             });
 
-            info!("Event writer task spawned");
+            tracing::info!("Event writer task spawned");
             Ok(())
         } else {
-            info!("Event writer task already spawned");
+            tracing::info!("Event writer task already spawned");
             Ok(())
         }
     }
@@ -73,7 +72,7 @@ impl EventWriter {
         match self.sender.try_send(event.clone()) {
             Ok(_) => Ok(()),
             Err(TrySendError::Full(event)) => {
-                warn!(
+                tracing::warn!(
                     "event_dropped: event_id={}, source={}, reason=queue_full",
                     event.id,
                     event.source.as_str()
@@ -83,7 +82,7 @@ impl EventWriter {
                 ))
             }
             Err(TrySendError::Closed(event)) => {
-                warn!("Failed to queue event {}: channel closed", event.id);
+                tracing::warn!("Failed to queue event {}: channel closed", event.id);
                 Err(crate::persistence::StorageError::EventInsertionError(
                     format!("Failed to queue event {}: channel closed", event.id),
                 ))
@@ -130,7 +129,7 @@ impl EventWriter {
                     if !batch.is_empty() {
                         Self::flush_batch(&db, &mut batch, emitter.clone()).await?;
                     }
-                    info!("Event writer task shutting down");
+                    tracing::info!("Event writer task shutting down");
                     break;
                 }
             }
@@ -173,7 +172,7 @@ impl EventWriter {
         }
 
         let elapsed = start.elapsed().as_millis();
-        info!(
+        tracing::info!(
             "db_write_batch_complete: batch_size={}, elapsed_ms={}",
             batch_size, elapsed
         );
@@ -200,7 +199,7 @@ impl EventWriter {
                 if let Some(bytes) = data {
                     // persist blob (best-effort)
                     if let Err(e) = db.insert_blob(content_hash, mime, bytes) {
-                        warn!("failed_to_insert_blob: {}", e);
+                        tracing::warn!("failed_to_insert_blob: {}", e);
                     }
                 }
                 Some(content_hash.as_str())
@@ -218,7 +217,7 @@ impl EventWriter {
             content_hash,
         )?;
 
-        debug!(
+        tracing::debug!(
             "event_ingested: event_id={}, source={}",
             event.id,
             event.source.as_str()

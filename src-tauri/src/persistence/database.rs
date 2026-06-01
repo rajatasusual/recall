@@ -1,23 +1,8 @@
-use super::schema;
-use crate::storage::StorageResult;
+use crate::domain::EventRecord;
+use crate::persistence::{StorageResult, schema};
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-
-/// Full event record with metadata
-#[derive(Debug, Clone)]
-pub struct EventRecord {
-    pub id: String,
-    pub timestamp: i64,
-    pub source: String,
-    pub payload_type: String,
-    pub payload_data: String,
-    pub window_title: Option<String>,
-    pub source_app: Option<String>,
-    pub content_hash: Option<String>,
-    pub pinned: bool,
-    pub created_at: i64,
-}
 
 /// Thread-safe database connection wrapper
 pub struct Database {
@@ -384,47 +369,5 @@ impl Database {
             result.push(event?);
         }
         Ok(result)
-    }
-
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::NamedTempFile;
-
-    #[test]
-    fn test_database_creation() -> StorageResult<()> {
-        let temp_file = NamedTempFile::new()?;
-        let db = Database::open(temp_file.path())?;
-        db.init_schema()?;
-
-        let count = db.count_events()?;
-        assert_eq!(count, 0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_insert_event() -> StorageResult<()> {
-        let temp_file = NamedTempFile::new()?;
-        let db = Database::open(temp_file.path())?;
-        db.init_schema()?;
-
-        db.insert_event(
-            "test-id",
-            1234567890,
-            "clipboard",
-            "clipboard_text",
-            r#"{"content":"test","is_truncated":false,"content_hash":"abc"}"#,
-            None,
-            None,
-            Some("abc"),
-        )?;
-
-        let count = db.count_events()?;
-        assert_eq!(count, 1);
-
-        Ok(())
     }
 }

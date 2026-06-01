@@ -6,10 +6,18 @@ use tauri::{
 use tauri_plugin_window_state::{Builder as WindowBuilder, StateFlags};
 use tracing_subscriber;
 
+// New module structure (Phase 2)
+pub mod config;
+pub mod domain;
+pub mod persistence;
+
+// Legacy modules (maintained for backward compatibility)
+mod api;
 mod commands;
 pub mod core;
-mod sources;
-pub mod storage;
+mod error;
+
+pub use error::{AppError, AppResult};
 
 type AppMenu = tauri::menu::Menu<tauri_runtime_wry::Wry<EventLoopMessage>>;
 type AppTrayIcon = tauri::tray::TrayIcon<tauri_runtime_wry::Wry<EventLoopMessage>>;
@@ -22,7 +30,7 @@ struct SingleInstancePayload {
 
 fn build_tray_menu(
     app: &tauri::AppHandle,
-    db: &std::sync::Arc<storage::Database>,
+    db: &std::sync::Arc<persistence::Database>,
 ) -> tauri::Result<AppMenu> {
     let clipboard_items = db.get_pinned_events().unwrap_or_default();
 
@@ -82,7 +90,7 @@ fn build_tray_menu(
 }
 
 fn refresh_tray_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let db = app.state::<std::sync::Arc<storage::Database>>().clone();
+    let db = app.state::<std::sync::Arc<persistence::Database>>().clone();
     let tray_icon = app.state::<std::sync::Arc<AppTrayIcon>>().clone();
     let menu = build_tray_menu(app, &db)?;
     tray_icon.set_menu(Some(menu))
@@ -148,7 +156,7 @@ pub fn run() {
 
             let db_path = app_dir.join("events.db");
             let db = std::sync::Arc::new(
-                storage::Database::open(&db_path).expect("Failed to open database"),
+                persistence::Database::open(&db_path).expect("Failed to open database"),
             );
 
             db.init_schema()
@@ -184,7 +192,7 @@ pub fn run() {
                                 db_for_menu.get_pinned_events().unwrap_or_default();
                             if let Some(rec) = clipboard_items.get(idx) {
                                 tracing::info!("Copying clipboard item {} to clipboard", idx);
-                                sources::copy_event_to_clipboard(rec, &db_for_menu, app);
+                                domain::clipboard::copy_event_to_clipboard(rec, &db_for_menu, app);
                             }
                         }
                     } else {
@@ -197,9 +205,9 @@ pub fn run() {
             app.manage(std::sync::Arc::new(tray_icon.clone()));
 
             // Initialize event writer
-            let writer = std::sync::Arc::new(storage::EventWriter::new(
+            let writer = std::sync::Arc::new(persistence::EventWriter::new(
                 db.clone(),
-                storage::writer::WriterConfig::default(),
+                persistence::writer::WriterConfig::default(),
                 Some(app.handle().clone()),
             ));
 
@@ -215,11 +223,15 @@ pub fn run() {
             let clipboard_writer = writer.clone();
             let clipboard_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                sources::start_clipboard_watcher(clipboard_writer, clipboard_app_handle, 400).await;
+                domain::clipboard::start_clipboard_watcher(clipboard_writer, clipboard_app_handle, 400).await;
             });
 
-            app.manage(db);
+            app.manage(db.clone());
             app.manage(writer);
+
+            // Initialize the event service layer
+            let event_service = api::EventService::new(db);
+            app.manage(event_service);
 
             tracing::info!("Database initialized at {:?}", db_path);
             Ok(())
@@ -241,7 +253,6 @@ pub fn run() {
             commands::events::unpin_event,
             commands::events::delete_event,
             commands::events::get_event_count,
-            commands::events::test_insert_clipboard_event,
             commands::events::delete_all_events
         ])
         .run(tauri::generate_context!())

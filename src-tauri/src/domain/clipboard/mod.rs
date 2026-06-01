@@ -1,5 +1,12 @@
-use crate::core::{Event, EventPayload, EventSource};
-use crate::storage::{self, EventWriter};
+//! Clipboard monitoring - Domain-level clipboard operations
+//!
+//! This module handles clipboard monitoring and content processing,
+//! independent of persistence details (which are handled in the API/persistence layers).
+
+use crate::core::Event;
+use crate::core::{EventPayload, EventSource};
+use crate::domain::EventRecord;
+use crate::persistence::EventWriter;
 use base64::Engine;
 use image::imageops::FilterType;
 use image::ImageOutputFormat;
@@ -119,12 +126,6 @@ fn get_active_app_and_window() -> (Option<String>, Option<String>) {
     (app_name, window_title)
 }
 
-/// Fallback for non-macOS platforms.
-#[cfg(not(target_os = "macos"))]
-fn get_active_app_and_window() -> (Option<String>, Option<String>) {
-    (None, None)
-}
-
 /// Process text from clipboard into ClipboardContent
 fn process_text(text: &str) -> Option<ClipboardContent> {
     let trimmed = text.trim();
@@ -163,10 +164,7 @@ fn process_image(image: tauri::image::Image<'_>) -> Option<ClipboardContent> {
         image.rgba().len()
     );
 
-    let expected_len = image
-        .width()
-        .checked_mul(image.height())?
-        .checked_mul(4)?;
+    let expected_len = image.width().checked_mul(image.height())?.checked_mul(4)?;
 
     if image.rgba().len() != expected_len as usize {
         tracing::warn!(
@@ -212,6 +210,7 @@ fn process_image(image: tauri::image::Image<'_>) -> Option<ClipboardContent> {
         preview_url,
     })
 }
+
 /// Emit clipboard content to storage, handling deduplication
 fn emit_content(
     content: ClipboardContent,
@@ -321,8 +320,8 @@ pub async fn start_clipboard_watcher(
 
 /// Helper function to copy an event's content to clipboard (handles both text and images)
 pub fn copy_event_to_clipboard<R: Runtime>(
-    event: &storage::db::EventRecord,
-    db: &std::sync::Arc<storage::Database>,
+    event: &EventRecord,
+    db: &std::sync::Arc<crate::persistence::Database>,
     app: &AppHandle<R>,
 ) {
     let clipboard = app.clipboard();
@@ -336,11 +335,8 @@ pub fn copy_event_to_clipboard<R: Runtime>(
                         Ok(img) => {
                             let rgba = img.to_rgba8();
                             let (width, height) = rgba.dimensions();
-                            let image = tauri::image::Image::new_owned(
-                                rgba.into_raw(),
-                                width,
-                                height,
-                            );
+                            let image =
+                                tauri::image::Image::new_owned(rgba.into_raw(), width, height);
 
                             if let Err(e) = clipboard.write_image(&image) {
                                 tracing::error!("Failed to copy image to clipboard: {}", e);

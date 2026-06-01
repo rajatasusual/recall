@@ -1,84 +1,143 @@
 # Recall — Intelligent Clipboard
 
 ## Brief
-
-Recall captures clipboard items (text and images), stores them locally, and provides a small Tauri + Preact UI to browse, pin, filter and restore clipboard entries. Images are automatically encoded to PNG, deduplicated by content hash, and displayed with preview thumbnails in the timeline. A system tray menu now also exposes the last 10 pinned clipboard items for fast restore back to the active clipboard.
-
+Recall captures clipboard items (text and images), stores them locally, and provides a Tauri + Preact UI to browse, pin, filter and restore clipboard entries.
+Architecture has been refactored into a **layered system**:
+- Domain layer (core types)
+- Service layer (business logic)
+- Persistence layer (SQLite + blobs)
+- API layer (Tauri command boundary)
+This separation improves testability, modularity, and alignment with Tauri v2 best practices.
+---
 ## Quick start (development)
-
-- Install dependencies and start the web UI/dev server:
-
 ```bash
 npm install
 npm run dev
-```
-
-- Start the Tauri dev runtime (from project root):
-
-```bash
 npm run tauri dev
-```
 
-### Backend (Tauri/Rust)
+⸻
 
-- Database file: stored in the platform app data directory as `events.db` (SQLite, WAL mode).
-- Main backend modules:
-  - `core` — event model (`Event`), payloads and helpers
-  - `sources` — clipboard polling via `tauri-plugin-clipboard-manager` and capture; runs in a fast, non-blocking background task and captures app/window context on macOS
-  - `storage` — DB wrapper, schema, and batched EventWriter; emits `events:new` to the frontend on new inserts
-  - `commands` — Tauri command handlers invoked by the frontend
+Backend architecture (Rust)
 
-### Available Tauri commands (invoke)
+Layers
 
-- `get_events(pinned_only?: boolean, source_app?: string)` — returns events, filters optional
-- `get_all_events()` — returns recent events (legacy)
-- `get_events_by_timestamp_range(start_ms, end_ms)`
-- `get_pinned_events()`
-- `pin_event(event_id)` / `unpin_event(event_id)`
-- `delete_event(event_id)`
-- `get_event_count()`
-- `test_insert_clipboard_event(content)` — test helper
+1. API layer (api/)
 
-## Realtime event flow:
-- frontend listens for `events:new` and merges newly ingested clipboard events into state without a full refresh
+* Thin Tauri command wrappers
+* Delegates all logic to services
+
+2. Service layer
+
+* EventService
+* Owns business logic (create, pin, delete, query)
+* Replaces direct DB access from commands
+
+3. Domain layer (domain/)
+
+* Pure types:
+    * Event
+    * EventPayload
+    * ClipboardContent
+* No I/O or framework dependencies
+
+4. Persistence layer (persistence/)
+
+* SQLite access
+* Schema definition
+* Batched writer (EventWriter)
+
+5. Config (config.rs)
+
+* Centralized runtime configuration
+* Environment-variable override support
+
+⸻
+
+Clipboard event flow
+
+1. Clipboard polling detects change
+2. Domain converts raw input → ClipboardContent
+3. Service layer validates + deduplicates
+4. Persistence layer writes:
+    * event row
+    * optional blob row (images)
+5. Frontend receives events:new update
+
+⸻
+
+Available Tauri commands
+
+All commands are service-backed:
+
+* get_events(pinned_only?, source_app?)
+* get_all_events()
+* get_events_by_timestamp_range(start, end)
+* get_pinned_events()
+* pin_event(id)
+* unpin_event(id)
+* delete_event(id)
+* get_event_count()
+
+⸻
 
 Frontend (src)
 
-- Preact + TypeScript UI lives in `src/` and components are under `src/components/`.
-- **Main component**: `EventTimeline` is the composable root view that coordinates state and event handling.
-- **Subcomponents** (in `src/components/timeline/`):
-  - `EventHeader` — filtering controls, event count, last refresh time, delete-all button, and toast messages
-  - `EventList` — container for rendering the event list
-  - `EventItem` — individual event display with timestamp, app context, content preview
-  - `EventActions` — action buttons (pin, copy, delete) with internal click animation state
-  - `ErrorBox` — error display with dismiss button
-- **Helpers** (in `src/components/helpers/`):
-  - `clipboard.ts` — clipboard operations (`copyTextToClipboard`, `copyImageToClipboard`, `copyEventContent`)
-  - `formatting.ts` — utilities for formatting timestamps, payload previews, and error messages
-- System tray menu: the last 10 pinned clipboard items are surfaced in the tray menu for quick restore back to the system clipboard.
-- **Image preview**: When an event payload type is `clipboard_image`, the UI renders an inline image preview (max 240×240px) sourced from the preview data URL stored in the event.
+Unchanged UI structure:
 
-## Design notes
+* EventTimeline — root controller
+* EventHeader — filters + controls
+* EventList — list container
+* EventItem — event rendering
+* EventActions — pin/copy/delete actions
+* ErrorBox — error display
 
-- **Deduplication**: Clipboard content is hashed (xxHash64) and stored as `content_hash` in the DB. Both text and image payloads are deduplicated; duplicate prevention happens both in-memory (last seen hash) and by consulting the DB before inserting.
-- **Image handling**: When clipboard text is empty, the watcher attempts to read image data. Images are encoded to PNG, a full-quality PNG is stored in the `blobs` table, and a resized preview (max 512×512px, encoded as base64 data URL) is included in the event payload for quick UI rendering.
-- **Polling**: System clipboard polling uses `arboard` inside a fast, non-blocking background task with a configurable interval (default 150ms), so clipboard reads stay responsive.
-- **Pinning**: `pinned` is a boolean column; pinned items are ordered to the top in queries.
-- **Context**: `source_app` and `window_title` (macOS) are captured per event where available.
+Helpers:
 
-## Where to look
+* clipboard.ts
+* formatting.ts
 
-- Backend: `src-tauri/src/`
-- Frontend: `src/components/EventTimeline.tsx`, `src/styles/EventTimeline.css`
-- DB schema: `src-tauri/src/storage/schema.rs`
+⸻
 
-## Next steps (ideas)
+Key improvements (post-refactor)
 
-- Add soft-delete / trash with undo
-- Add search and tag extraction
-- Add more content types (files, rich text formatting)
-- Add blob retrieval endpoint for full-quality image downloads
-- Improve timeline image copy and cross-platform native image clipboard restore
+Architecture
 
-## License
-MIT
+* Clear separation: domain → service → persistence → API
+* Commands reduced to thin adapters
+
+Maintainability
+
+* Business logic centralized in EventService
+* Storage logic isolated in persistence/
+
+Testability
+
+* Domain and service layers are unit-test friendly
+* Config injection enables deterministic tests
+
+Reliability
+
+* Improved error handling via structured AppError
+* Better type safety in service-return boundaries
+
+⸻
+
+Database
+
+No schema changes:
+
+* events
+* blobs
+* edges
+
+All remain backward compatible.
+
+⸻
+
+Next steps
+
+* Complete migration of remaining core logic into domain layer
+* Introduce repository traits for persistence abstraction
+* Add full-text search pipeline
+* Add observability (tracing per service call)
+* Optimize clipboard polling efficiency

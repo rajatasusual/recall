@@ -1,136 +1,137 @@
 # Architecture — Recall (clipboard)
-
 ## Overview
+Recall is a Tauri desktop app with a Rust backend and a Preact frontend. The backend captures clipboard events (text and images), batches and stores them in SQLite with binary blob support, and exposes query and mutation commands to the UI via Tauri invokes.
+The backend follows a **domain-driven + layered architecture**:
+- Domain layer (pure types and business entities)
+- Service layer (business logic orchestration)
+- Persistence layer (database + schema + writers)
+- API layer (Tauri commands + services boundary)
+- Config layer (centralized application configuration)
+Image content is deduplicated by content hash, encoded to PNG with preview thumbnails, and stored separately in a `blobs` table for efficient retrieval.
+---
+## Architecture layers (post-refactor)
 
-Recall is a Tauri desktop app with a Rust backend and a Preact frontend. The backend captures clipboard events (text and images), batches and stores them in SQLite with binary blob support, and exposes query and mutation commands to the UI via Tauri invokes. Image content is deduplicated by content hash, encoded to PNG with preview thumbnails, and stored separately in a `blobs` table for efficient retrieval.
+Frontend (Preact)
+↓
+API Layer (Tauri commands / handlers)
+↓
+Service Layer (EventService, orchestration logic)
+↓
+Domain Layer (Event, ClipboardContent, etc.)
+↓
+Persistence Layer (Database, Writer, Schema)
+↓
+SQLite + Blob Store
 
+---
 ## High-level components
-
-- Frontend (Preact/TypeScript)
-  - `src/components/EventTimeline.tsx` — root component managing state, event loading, filtering, and orchestrating subcomponents.
-  - `src/components/timeline/` — modular subcomponents:
-    - `EventHeader.tsx` — filter controls, event count, and delete-all action.
-    - `EventList.tsx` — container component for the event list.
-    - `EventItem.tsx` — individual event display (timestamp, app, preview, content).
-    - `EventActions.tsx` — action buttons with local click-animation state management.
-    - `ErrorBox.tsx` — error display and dismissal.
-  - `src/components/helpers/` — utility modules:
-    - `clipboard.ts` — clipboard read/write helpers using the web Clipboard API.
-    - `formatting.ts` — timestamp formatting, payload preview extraction, error formatting, and utility functions.
-  - `src/styles/EventTimeline.css` — styling for the timeline and UI components.
-  - `src/types.ts` — shared type definitions for the frontend.
-
-- Backend (Rust/Tauri)
-  - `core` — `Event` struct and `EventPayload` enum. `EventPayload` supports `ClipboardText` and `ClipboardImage` variants. Key event fields: `id`, `timestamp`, `source`, `payload`, `window_title`, `source_app`, `pinned`.
-  - `sources` — clipboard watcher (`sources/clipboard.rs`) polls the system clipboard using `tauri-plugin-clipboard-manager` (plugin API initialized in `lib.rs`). Refactored with helper functions (`process_text`, `process_image`, `emit_content`) for code reuse:
-    - Text: computes xxHash64 `content_hash`, handles truncation if >50KB.
-    - Image: encodes PNG, generates base64 data URL preview (max 512×512px), computes hash of full PNG bytes.
-    - Both: deduplicated via `content_exists()` check before emission.
-    - Captures context (frontmost app and window title on macOS via `osascript`).
-  - `storage` — DB layer (`db.rs`) and schema (`schema.rs`) manage `events`, `blobs`, and `edges` tables. `EventWriter` batches writes for efficiency and creates temporal edges between consecutive events. Blob insertion is best-effort to avoid blocking event writes.
-  - `commands` — Tauri-invokable handlers that map to storage operations (get, filter, pin/unpin, delete).
-  - `lib.rs` — application bootstrap and tray menu wiring. The tray menu now exposes the last 10 pinned clipboard items and restores clipboard contents using the plugin API (`clipboard.write_text()`, `clipboard.write_image()`); image restore reads stored PNG blobs and writes native image data via the plugin.
-
+### Frontend (Preact/TypeScript)
+- `src/components/EventTimeline.tsx` — root component managing state, filtering, and orchestration
+- `src/components/timeline/`
+  - `EventHeader.tsx`
+  - `EventList.tsx`
+  - `EventItem.tsx`
+  - `EventActions.tsx`
+  - `ErrorBox.tsx`
+- `src/components/helpers/`
+  - `clipboard.ts`
+  - `formatting.ts`
+- `src/styles/EventTimeline.css`
+- `src/types.ts`
+---
+### Backend (Rust/Tauri)
+#### API layer (`api/`)
+- `api/services.rs` — service façade used by Tauri commands
+- `commands/events.rs` — thin command handlers delegating to services
+Commands are now **thin wrappers** over services (no business logic inside handlers).
+---
+#### Service layer (`services`)
+- `EventService`
+  - Encapsulates event creation, querying, pinning, deletion
+  - Replaces direct DB access from commands
+  - Centralizes business rules (validation, mapping, transformations)
+---
+#### Domain layer (`domain`)
+- `domain/event`
+  - `Event`
+  - `EventPayload`
+  - `EventRecord`
+- `domain/clipboard`
+  - Clipboard content abstraction (`ClipboardContent`)
+  - Processing logic for text/image normalization
+Domain layer is **framework-agnostic** and contains no persistence or Tauri dependencies.
+---
+#### Persistence layer (`persistence`)
+- `persistence/database.rs` — SQLite connection + queries
+- `persistence/schema.rs` — schema definition (events, blobs, edges)
+- `persistence/writer.rs` — batched event writer
+- `storage/mod.rs` — backward-compatible re-exports
+---
+#### Core / legacy compatibility
+- `core/` retained for compatibility and incremental migration
+- Gradual migration target: domain + service fully replaces core logic
+---
+#### Config layer (`config.rs`)
+- `AppConfig`
+- `ClipboardConfig`
+- `StorageConfig`
+- `WriterConfig`
+Supports environment overrides and test-time configuration injection.
+---
 ## Database schema
-
-**events table**
-
-Columns:
-- `id` TEXT PRIMARY KEY (UUID)
-- `timestamp` INTEGER (ms since epoch)
-- `source` TEXT (e.g., "clipboard")
-- `payload_type` TEXT (`clipboard_text` or `clipboard_image`)
-- `payload_data` TEXT (JSON serialized payload, includes preview URL for images but not raw binary)
-- `window_title` TEXT
-- `source_app` TEXT
-- `content_hash` TEXT (xxHash64 of content)
-- `pinned` INTEGER (0/1)
-- `created_at` INTEGER (insert time ms)
-
-Indexes:
-- `idx_events_timestamp` — for sorting by time
-- `idx_events_content_hash` — for fast duplicate lookup
-- `idx_events_pinned` — to filter/order pinned items
-- `idx_events_source_app` — to filter by app
-
-**blobs table**
-
-Stores binary image data referenced by content hash (allows events to be lightweight JSON while preserving full-quality images):
-
-Columns:
-- `content_hash` TEXT PRIMARY KEY (xxHash64 of image PNG bytes)
-- `mime` TEXT (e.g., "image/png")
-- `data` BLOB (raw PNG bytes)
-- `created_at` INTEGER (insert time ms)
-
-Indexes:
-- `idx_blobs_content_hash` — for fast retrieval
-
-**edges table**
-
-Temporal relationships between consecutive events (optional graph layer for future analytics):
-
-Columns:
-- `from_id` TEXT (event id)
-- `to_id` TEXT (event id)
-- `relation_type` TEXT (e.g., "temporal_next")
-- PRIMARY KEY (from_id, to_id, relation_type)
-
-## Event flow
-
-1. **Clipboard polling** (default 150ms interval) attempts to read clipboard:
-   - If text is found (non-empty after trim):
-     - Compute xxHash64 `content_hash` and compare with last-seen hash to avoid rapid duplicates.
-     - Query `content_exists()` — if true, skip storing; otherwise proceed to step 3.
-   - If text is empty:
-     - Attempt to read image data.
-     - If image found, encode to PNG, generate preview (max 512×512px), compute hash of full PNG bytes, and proceed to step 3.
-     - If no image, sleep and continue polling.
-
-2. **Deduplication & event creation**:
-   - Via helper functions `process_text()` and `process_image()`, create a `ClipboardContent` enum (text or image variant).
-   - Call `emit_content()` which checks `content_exists()` and, if the content is new or on dedup failure, creates an `Event` from the `ClipboardContent` and queues it to `EventWriter`.
-
-3. **Batched persistence**:
-   - `EventWriter` accumulates events in a queue, flushes when batch size is reached or on timer tick.
-   - For each event, insert into `events` table; if payload is `ClipboardImage` and has raw PNG bytes, also insert into `blobs` table (best-effort, warnings on failure).
-   - Emit `events:new` to the frontend on successful inserts.
-
-4. **Frontend realtime merge**:
-   - Frontend listens for `events:new` and merges incoming events into local state, avoiding a full list refresh.
-
-5. **User interactions** (frontend invokes):
-   - `get_events()` — list & filter events.
-   - `pin_event()` / `unpin_event()` — manage pinning.
-   - `delete_event()` — remove an event.
-   - (Copy-to-clipboard is handled client-side.)
-
+### events table
+Same structure as before, with no semantic changes.
+### blobs table
+Same structure as before.
+### edges table
+Same structure as before.
+---
+## Event flow (post-refactor)
+1. Clipboard polling (`sources/clipboard.rs`)
+   - Reads text or image
+   - Converts into `ClipboardContent` (domain abstraction)
+2. Domain processing
+   - `process_text()` / `process_image()`
+   - Computes hash + normalization
+   - Produces unified content type
+3. Service layer (`EventService`)
+   - Applies business rules
+   - Calls persistence layer via writer/database
+4. Persistence layer
+   - Inserts into `events`
+   - Inserts into `blobs` (if image)
+   - Emits durability guarantees (best-effort blob writes preserved)
+5. API layer
+   - Tauri commands call `EventService`
+6. Frontend
+   - Listens to `events:new` events
+   - Updates UI incrementally
+---
 ## Deduplication
-
-- **In-memory (text only)**: `last_hash` prevents rapid duplicate text entries on the same polling loop.
-- **Persistent (text & image)**: `content_hash` in the `events` table and `blobs` table prevent inserting duplicates already stored in DB (useful across restarts and multiple clipboard changes).
-- **Hashing**: 
-  - **Text**: xxHash64 over the trimmed text content.
-  - **Image**: xxHash64 over the full PNG-encoded bytes (not the preview).
-- **Best-effort dedup**: `emit_content()` checks `content_exists()` and emits regardless of success/failure to avoid losing events on transient DB errors.
-
+Unchanged behavior, but now logically split:
+- Domain layer: hash computation
+- Service layer: deduplication decision
+- Persistence layer: enforcement via DB lookup
+Mechanisms:
+- In-memory last-hash (fast-path)
+- DB-level `content_hash` uniqueness
+- Best-effort dedup in `emit_content`
+---
 ## Commands (summary)
-
-- `get_events(pinned_only?, source_app?)`
-- `get_all_events()`
-- `get_events_by_timestamp_range(start, end)`
-- `get_pinned_events()`
-- `pin_event(id)`, `unpin_event(id)`
-- `delete_event(id)`
-- `get_event_count()`
-
+All commands now route through `EventService`:
+- `get_events`
+- `get_all_events`
+- `get_events_by_timestamp_range`
+- `get_pinned_events`
+- `pin_event`, `unpin_event`
+- `delete_event`
+- `get_event_count`
+---
 ## Notes / Future work
+- Core → Domain migration completion
+- Move remaining legacy modules into `domain/` and `persistence/`
+- Introduce event pipeline observability (tracing spans per layer)
+- Add repository traits to decouple persistence backend
+- Add full-text search service layer abstraction
 
-- **Code reuse**: Image and text handling share a unified `ClipboardContent` enum and common `emit_content()` deduplication logic; new payload types can be added by extending the enum.
-- **Refactoring**: `process_text()`, `process_image()`, and `emit_content()` helper functions keep the main polling loop lean and testable.
-- **Cross-platform**: Improve app/window capture for Linux and Windows (accessibility APIs, platform-specific crates).
-- **Search & categorization**: Add full-text search, fuzzy match, and tag extraction.
-- **Soft-delete**: Add trash / undo flow and confirm deletion.
-- **Blob retrieval**: Add endpoint for fetching full-quality images (currently preview is in event, full PNG is in blobs table).
-- **Image-to-clipboard restore**: Tray menu image restore now supports native image copy from stored PNG blobs; frontend timeline image copy remains an area for further improvement.
-
+⸻

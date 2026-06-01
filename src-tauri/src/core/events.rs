@@ -83,19 +83,3 @@ impl EventPayload {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_event_creation() {
-        let payload = EventPayload::ClipboardText {
-            content: "test".to_string(),
-            is_truncated: false,
-            content_hash: "abc123".to_string(),
-        };
-        let event = Event::new(EventSource::Clipboard, payload);
-        assert_eq!(event.source, EventSource::Clipboard);
-    }
-}

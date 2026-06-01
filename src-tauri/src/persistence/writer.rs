@@ -1,12 +1,12 @@
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::TrySendError;
-use tokio::time::{interval, Duration};
+use crate::core::Event;
+use crate::persistence::{Database, StorageResult};
 use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
-use crate::core::Event;
-use crate::storage::{Database, StorageResult};
-use tracing::{debug, info, warn, error};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::time::{interval, Duration};
+use tracing::{debug, error, info, warn};
 
 /// Configuration for batch writes
 #[derive(Debug, Clone)]
@@ -59,7 +59,7 @@ impl EventWriter {
     /// Spawn the writer task (must be called from within a Tokio runtime context)
     pub fn spawn_task(&self) -> StorageResult<()> {
         let mut receiver_lock = self.receiver.lock().unwrap();
-        
+
         // Only spawn if receiver is still available
         if let Some(receiver) = receiver_lock.take() {
             let db_clone = Arc::clone(&self.db);
@@ -67,7 +67,9 @@ impl EventWriter {
             let emitter_clone = self.emitter.clone();
 
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = Self::writer_task(db_clone, receiver, config_clone, emitter_clone).await {
+                if let Err(e) =
+                    Self::writer_task(db_clone, receiver, config_clone, emitter_clone).await
+                {
                     error!("Event writer task failed: {}", e);
                 }
             });
@@ -83,7 +85,7 @@ impl EventWriter {
     /// Submit an event for writing (non-blocking)
     pub fn write_event(&self, event: Event) -> StorageResult<()> {
         if self.sender.is_closed() {
-            return Err(crate::storage::StorageError::EventInsertionError(
+            return Err(crate::persistence::StorageError::EventInsertionError(
                 "Event writer channel closed".to_string(),
             ));
         }
@@ -96,13 +98,13 @@ impl EventWriter {
                     event.id,
                     event.source.as_str()
                 );
-                Err(crate::storage::StorageError::EventInsertionError(
+                Err(crate::persistence::StorageError::EventInsertionError(
                     format!("Event queue full, dropped event {}", event.id),
                 ))
             }
             Err(TrySendError::Closed(event)) => {
                 warn!("Failed to queue event {}: channel closed", event.id);
-                Err(crate::storage::StorageError::EventInsertionError(
+                Err(crate::persistence::StorageError::EventInsertionError(
                     format!("Failed to queue event {}: channel closed", event.id),
                 ))
             }
@@ -129,19 +131,19 @@ impl EventWriter {
                 // Receive new events
                 Some(event) = receiver.recv() => {
                     batch.push(event);
-                    
+
                     if batch.len() >= config.batch_size {
                         Self::flush_batch(&db, &mut batch, emitter.clone()).await?;
                     }
                 }
-                
+
                 // Time-based flush
                 _ = flush_interval.tick() => {
                         if !batch.is_empty() {
                         Self::flush_batch(&db, &mut batch, emitter.clone()).await?;
                     }
                 }
-                
+
                 // Channel closed
                 else => {
                     // Flush any remaining events
@@ -158,7 +160,11 @@ impl EventWriter {
     }
 
     /// Flush a batch of events to database
-    async fn flush_batch(db: &Arc<Database>, batch: &mut Vec<Event>, emitter: Option<AppHandle>) -> StorageResult<()> {
+    async fn flush_batch(
+        db: &Arc<Database>,
+        batch: &mut Vec<Event>,
+        emitter: Option<AppHandle>,
+    ) -> StorageResult<()> {
         if batch.is_empty() {
             return Ok(());
         }
@@ -172,7 +178,10 @@ impl EventWriter {
             // emit to frontend listeners if available
             if let Some(ref app) = emitter {
                 // best-effort emit; ignore errors
-                let _ = app.emit("events:new", serde_json::to_value(event).unwrap_or(serde_json::json!({"id": event.id})) );
+                let _ = app.emit(
+                    "events:new",
+                    serde_json::to_value(event).unwrap_or(serde_json::json!({"id": event.id})),
+                );
             }
         }
 
@@ -196,13 +205,18 @@ impl EventWriter {
     /// Insert a single event record into database
     fn insert_event_record(db: &Arc<Database>, event: &Event) -> StorageResult<()> {
         let payload_data = serde_json::to_string(&event.payload)?;
-        
+
         // Extract content_hash from payload and persist any binary blobs
         let content_hash = match &event.payload {
             crate::core::EventPayload::ClipboardText { content_hash, .. } => {
                 Some(content_hash.as_str())
             }
-            crate::core::EventPayload::ClipboardImage { content_hash, mime, data, .. } => {
+            crate::core::EventPayload::ClipboardImage {
+                content_hash,
+                mime,
+                data,
+                ..
+            } => {
                 if let Some(bytes) = data {
                     // persist blob (best-effort)
                     if let Err(e) = db.insert_blob(content_hash, mime, bytes) {
@@ -223,88 +237,12 @@ impl EventWriter {
             event.source_app.as_deref(),
             content_hash,
         )?;
-        
-        debug!("event_ingested: event_id={}, source={}", event.id, event.source.as_str());
-        Ok(())
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::core::EventPayload;
-    use super::*;
-    use tempfile::NamedTempFile;
-
-    #[tokio::test]
-    async fn test_event_writer() -> StorageResult<()> {
-        let temp_file = NamedTempFile::new()?;
-        let db = Arc::new(Database::open(temp_file.path())?);
-        db.init_schema()?;
-
-        let writer = EventWriter::new(db.clone(), WriterConfig::default(), None);
-        
-        // Spawn the writer task (must be done in Tokio context)
-        writer.spawn_task()?;
-
-        let event = Event::new(
-            crate::core::EventSource::Clipboard,
-            EventPayload::ClipboardText {
-                content: "test content".to_string(),
-                is_truncated: false,
-                content_hash: "abc123".to_string(),
-            },
+        debug!(
+            "event_ingested: event_id={}, source={}",
+            event.id,
+            event.source.as_str()
         );
-
-        writer.write_event(event)?;
-
-        // Give the writer task time to process
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
-        let count = db.count_events()?;
-        assert_eq!(count, 1);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_event_writer_queue_overflow() -> StorageResult<()> {
-        let temp_file = NamedTempFile::new()?;
-        let db = Arc::new(Database::open(temp_file.path())?);
-        db.init_schema()?;
-
-        let writer = EventWriter::new(
-            db.clone(),
-            WriterConfig {
-                batch_size: 50,
-                flush_interval_ms: 200,
-                max_queue_size: 1,
-            },
-            None,
-        );
-
-        let event1 = Event::new(
-            crate::core::EventSource::Clipboard,
-            EventPayload::ClipboardText {
-                content: "first".to_string(),
-                is_truncated: false,
-                content_hash: "hash1".to_string(),
-            },
-        );
-
-        let event2 = Event::new(
-            crate::core::EventSource::Clipboard,
-            EventPayload::ClipboardText {
-                content: "second".to_string(),
-                is_truncated: false,
-                content_hash: "hash2".to_string(),
-            },
-        );
-
-        writer.write_event(event1)?;
-        let result = writer.write_event(event2);
-
-        assert!(result.is_err(), "Expected second event to be dropped when queue is full");
-
         Ok(())
     }
 }

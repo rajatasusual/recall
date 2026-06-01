@@ -1,4 +1,3 @@
-use arboard::{Clipboard, ImageData};
 use serde_json::Value;
 use tauri::{
     tray::TrayIconBuilder, Emitter, EventLoopMessage, Manager, WebviewUrl, WebviewWindowBuilder,
@@ -18,75 +17,6 @@ type AppTrayIcon = tauri::tray::TrayIcon<tauri_runtime_wry::Wry<EventLoopMessage
 struct SingleInstancePayload {
     args: Vec<String>,
     cwd: String,
-}
-
-/// Helper function to copy an event's content to clipboard (handles both text and images)
-fn copy_event_to_clipboard(
-    event: &storage::db::EventRecord,
-    db: &std::sync::Arc<storage::Database>,
-) {
-    // Determine if this is an image or text
-    let is_image = event.payload_type.contains("image");
-
-    if is_image {
-        // For images, extract content_hash and fetch the binary data from blobs
-        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload_data) {
-            if let Some(content_hash) = payload.get("content_hash").and_then(|v| v.as_str()) {
-                if let Ok(Some((_mime, data))) = db.get_blob(content_hash) {
-                    match Clipboard::new() {
-                        Ok(mut clipboard) => {
-                            // Decode image bytes into a format usable by arboard
-                            // NOTE: arboard expects raw RGBA, not encoded PNG/JPEG
-                            if let Ok(img) = image::load_from_memory(&data) {
-                                let rgba = img.to_rgba8();
-                                let (width, height) = rgba.dimensions();
-                                let image = ImageData {
-                                    width: width as usize,
-                                    height: height as usize,
-                                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
-                                };
-
-                                if clipboard.set_image(image).is_ok() {
-                                    tracing::info!("Image copied to clipboard");
-                                } else {
-                                    tracing::error!("Failed to set image in clipboard");
-                                }
-                            } else {
-                                tracing::error!("Failed to decode image bytes");
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("Clipboard init failed: {}", e);
-                        }
-                    }
-                } else {
-                    tracing::warn!("Image blob not found for content_hash: {}", content_hash);
-                }
-            }
-        }
-    } else {
-        // For text items, extract the "content" field
-        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload_data) {
-            let text_content = payload
-                .get("content")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| {
-                    // Fallback to the whole payload if "content" field doesn't exist
-                    event.payload_data.clone()
-                });
-
-            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                if let Err(e) = clipboard.set_text(text_content) {
-                    tracing::error!("Failed to copy text to clipboard: {}", e);
-                } else {
-                    tracing::info!("Text copied to clipboard successfully");
-                }
-            }
-        } else {
-            tracing::error!("Failed to parse event payload as JSON");
-        }
-    }
 }
 
 fn build_tray_menu(
@@ -179,6 +109,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Recall")
@@ -205,7 +136,8 @@ pub fn run() {
             // tray icon setup with clipboard items
 
             // Get recent clipboard items
-            let menu = build_tray_menu(&app.handle(), &db)?;
+            let menu_handle = app.handle();
+            let menu = build_tray_menu(&menu_handle, &db)?;
 
             // Clone db for the menu event handler
             let db_for_menu = db.clone();
@@ -230,7 +162,7 @@ pub fn run() {
                             let clipboard_items = db_for_menu.get_pinned_events().unwrap_or_default();
                             if let Some(rec) = clipboard_items.get(idx) {
                                 tracing::info!("Copying clipboard item {} to clipboard", idx);
-                                copy_event_to_clipboard(&rec, &db_for_menu);
+                                sources::copy_event_to_clipboard(rec, &db_for_menu, app);
                             }
                         }
                     } else {
@@ -259,8 +191,9 @@ pub fn run() {
 
             // Start clipboard polling
             let clipboard_writer = writer.clone();
+            let clipboard_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                sources::start_clipboard_watcher(clipboard_writer, 400).await;
+                sources::start_clipboard_watcher(clipboard_writer, clipboard_app_handle, 400).await;
             });
 
             app.manage(db);

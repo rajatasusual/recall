@@ -1,12 +1,15 @@
 use crate::core::{Event, EventPayload, EventSource};
-use crate::storage::EventWriter;
-use arboard::Clipboard;
+use crate::storage::{self, EventWriter};
 use base64::Engine;
 use image::imageops::FilterType;
 use image::ImageOutputFormat;
+use serde_json::Value;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use tauri::{AppHandle, EventLoopMessage, Runtime};
+use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_runtime_wry::Wry;
 use tracing::{error, warn};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -132,7 +135,7 @@ fn process_text(text: &str) -> Option<ClipboardContent> {
     let content_hash = xxh3_64(trimmed.as_bytes());
     let hash_string = format!("{content_hash:016x}");
 
-    let (stored_content, is_truncated) = if trimmed.as_bytes().len() > MAX_CLIPBOARD_PAYLOAD_BYTES {
+    let (stored_content, is_truncated) = if trimmed.len() > MAX_CLIPBOARD_PAYLOAD_BYTES {
         (
             trimmed
                 .chars()
@@ -152,37 +155,37 @@ fn process_text(text: &str) -> Option<ClipboardContent> {
 }
 
 /// Process image from clipboard into ClipboardContent
-fn process_image(image: arboard::ImageData) -> Option<ClipboardContent> {
+fn process_image(image: tauri::image::Image<'_>) -> Option<ClipboardContent> {
     tracing::debug!(
         "processing image: {}x{}, {} bytes",
-        image.width,
-        image.height,
-        image.bytes.len()
+        image.width(),
+        image.height(),
+        image.rgba().len()
     );
 
-    let expected_len = image.width
-        .checked_mul(image.height)?
+    let expected_len = image
+        .width()
+        .checked_mul(image.height())?
         .checked_mul(4)?;
 
-    if image.bytes.len() != expected_len {
+    if image.rgba().len() != expected_len as usize {
         tracing::warn!(
             "invalid image size: expected {} bytes, got {}",
             expected_len,
-            image.bytes.len()
+            image.rgba().len()
         );
         return None;
     }
 
     let buf = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(
-        image.width as u32,
-        image.height as u32,
-        image.bytes.into_owned(),
+        image.width(),
+        image.height(),
+        image.rgba().to_vec(),
     )?;
 
     let dyn_img = image::DynamicImage::ImageRgba8(buf);
 
     let mut png_bytes = Vec::new();
-
     dyn_img
         .write_to(
             &mut std::io::Cursor::new(&mut png_bytes),
@@ -190,14 +193,8 @@ fn process_image(image: arboard::ImageData) -> Option<ClipboardContent> {
         )
         .ok()?;
 
-    let preview = dyn_img.resize(
-        PREVIEW_MAX_DIM,
-        PREVIEW_MAX_DIM,
-        FilterType::Lanczos3,
-    );
-
+    let preview = dyn_img.resize(PREVIEW_MAX_DIM, PREVIEW_MAX_DIM, FilterType::Lanczos3);
     let mut preview_buf = Vec::new();
-
     preview
         .write_to(
             &mut std::io::Cursor::new(&mut preview_buf),
@@ -205,14 +202,9 @@ fn process_image(image: arboard::ImageData) -> Option<ClipboardContent> {
         )
         .ok()?;
 
-    let preview_b64 =
-        base64::engine::general_purpose::STANDARD.encode(&preview_buf);
-
-    let preview_url =
-        format!("data:image/png;base64,{preview_b64}");
-
-    let content_hash =
-        format!("{:016x}", xxh3_64(&png_bytes));
+    let preview_b64 = base64::engine::general_purpose::STANDARD.encode(&preview_buf);
+    let preview_url = format!("data:image/png;base64,{preview_b64}");
+    let content_hash = format!("{:016x}", xxh3_64(&png_bytes));
 
     Some(ClipboardContent::Image {
         hash: content_hash,
@@ -246,33 +238,27 @@ fn emit_content(
     }
 }
 
-pub async fn start_clipboard_watcher(writer: Arc<EventWriter>, interval_ms: u64) {
+pub async fn start_clipboard_watcher(
+    writer: Arc<EventWriter>,
+    app_handle: AppHandle<Wry<EventLoopMessage>>,
+    interval_ms: u64,
+) {
     let poll_interval = Duration::from_millis(interval_ms.max(CLIPBOARD_POLL_INTERVAL_MS));
 
     thread::spawn(move || {
-        let mut clipboard = match Clipboard::new() {
-            Ok(c) => c,
-            Err(err) => {
-                error!(
-                    "clipboard_watch_error: failed to initialize clipboard: {}",
-                    err
-                );
-                return;
-            }
-        };
-
-        let mut last_hash: Option<u64> = None;
+        let clipboard = app_handle.clipboard();
+        let mut last_hash: Option<String> = None;
 
         loop {
             let (source_app, window_title) = get_active_app_and_window();
 
             // Try text first
-            match clipboard.get_text() {
+            match clipboard.read_text() {
                 Ok(contents) => {
                     if let Some(content) = process_text(&contents) {
-                        let hash = xxh3_64(contents.trim().as_bytes());
+                        let hash = content.hash().to_string();
 
-                        if last_hash != Some(hash) {
+                        if last_hash.as_deref() != Some(&hash) {
                             emit_content(
                                 content,
                                 &writer,
@@ -283,23 +269,21 @@ pub async fn start_clipboard_watcher(writer: Arc<EventWriter>, interval_ms: u64)
                         }
                     }
                 }
-
                 Err(_) => {
                     // Text unavailable; clipboard may contain an image.
-                    match clipboard.get_image() {
+                    match clipboard.read_image() {
                         Ok(image) => {
                             tracing::debug!(
                                 "clipboard image detected: {}x{} ({} bytes)",
-                                image.width,
-                                image.height,
-                                image.bytes.len()
+                                image.width(),
+                                image.height(),
+                                image.rgba().len()
                             );
 
                             if let Some(content) = process_image(image) {
-                                let image_hash =
-                                    u64::from_str_radix(content.hash(), 16).unwrap_or(0);
+                                let image_hash = content.hash().to_string();
 
-                                if last_hash != Some(image_hash) {
+                                if last_hash.as_deref() != Some(&image_hash) {
                                     emit_content(
                                         content,
                                         &writer,
@@ -313,7 +297,6 @@ pub async fn start_clipboard_watcher(writer: Arc<EventWriter>, interval_ms: u64)
                                 tracing::warn!("clipboard image could not be processed");
                             }
                         }
-
                         Err(err) => {
                             // Neither text nor image available.
                             let msg = err.to_string();
@@ -334,4 +317,61 @@ pub async fn start_clipboard_watcher(writer: Arc<EventWriter>, interval_ms: u64)
             thread::sleep(poll_interval);
         }
     });
+}
+
+/// Helper function to copy an event's content to clipboard (handles both text and images)
+pub fn copy_event_to_clipboard<R: Runtime>(
+    event: &storage::db::EventRecord,
+    db: &std::sync::Arc<storage::Database>,
+    app: &AppHandle<R>,
+) {
+    let clipboard = app.clipboard();
+    let is_image = event.payload_type.contains("image");
+
+    if is_image {
+        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload_data) {
+            if let Some(content_hash) = payload.get("content_hash").and_then(|v| v.as_str()) {
+                if let Ok(Some((_mime, data))) = db.get_blob(content_hash) {
+                    match image::load_from_memory(&data) {
+                        Ok(img) => {
+                            let rgba = img.to_rgba8();
+                            let (width, height) = rgba.dimensions();
+                            let image = tauri::image::Image::new_owned(
+                                rgba.into_raw(),
+                                width,
+                                height,
+                            );
+
+                            if let Err(e) = clipboard.write_image(&image) {
+                                tracing::error!("Failed to copy image to clipboard: {}", e);
+                            } else {
+                                tracing::info!("Image copied to clipboard");
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to decode image bytes: {}", e);
+                        }
+                    }
+                } else {
+                    tracing::warn!("Image blob not found for content_hash: {}", content_hash);
+                }
+            }
+        }
+    } else {
+        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload_data) {
+            let text_content = payload
+                .get("content")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| event.payload_data.clone());
+
+            if let Err(e) = clipboard.write_text(text_content) {
+                tracing::error!("Failed to copy text to clipboard: {}", e);
+            } else {
+                tracing::info!("Text copied to clipboard successfully");
+            }
+        } else {
+            tracing::error!("Failed to parse event payload as JSON");
+        }
+    }
 }

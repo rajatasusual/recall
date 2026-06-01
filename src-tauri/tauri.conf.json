@@ -21,7 +21,8 @@
         "connect-src": "'self' ipc: http://ipc.localhost",
         "script-src": "'self'",
         "style-src": "'self'",
-        "media-src": "'self' blob:"
+        "media-src": "'self' blob:",
+        "img-src": "'self' data: blob:"
       }
     }
   },

@@ -3,32 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { EventRecord } from "../types";
 
-const copyTextToClipboard = async (text: string) => {
-  // prefer the web clipboard when available
-  try {
-    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch (e) {
-    // fall through to tauri fallback
-  }
-};
-
-const copyImageToClipboard = async (dataUrl: string) => {
-  try {
-    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.write) {
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      const item = new ClipboardItem({ [blob.type]: blob });
-      await navigator.clipboard.write([item]);
-      return;
-    }
-  } catch (e) {
-    // fall through to tauri fallback
-  }
-}
-
 interface EventTimelineProps {
   refreshInterval?: number;
 }
@@ -43,6 +17,59 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
+  const formatError = (err: unknown): string => {
+    if (err instanceof Error) {
+      return [
+        `Message: ${err.message}`,
+        err.stack ? `\nStack:\n${err.stack}` : "",
+      ].join("");
+    }
+
+    try {
+      return JSON.stringify(err, null, 2);
+    } catch {
+      return String(err);
+    }
+  };
+
+  const copyTextToClipboard = async (text: string) => {
+    // prefer the web clipboard when available
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch (e) {
+      setError(formatError(e));
+    }
+  };
+
+  function dataUrlToBlob(dataUrl: string): Blob {
+    const [header, base64] = dataUrl.split(",");
+    const mime = header.match(/:(.*?);/)?.[1] ?? "image/png";
+
+    const bytes = atob(base64);
+    const array = new Uint8Array(bytes.length);
+
+    for (let i = 0; i < bytes.length; i++) {
+      array[i] = bytes.charCodeAt(i);
+    }
+
+    return new Blob([array], { type: mime });
+  }
+
+  const copyImageToClipboard = async (dataUrl: string) => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.write) {
+        const blob = dataUrlToBlob(dataUrl);
+        const item = new ClipboardItem({ [blob.type]: blob });
+        await navigator.clipboard.write([item]);
+        return;
+      }
+    } catch (e) {
+      setError(formatError(e));
+    }
+  };
   const showToast = (message: string) => {
     setToastMessage(message);
     if (toastTimerRef.current) {
@@ -67,7 +94,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
       setEvents(allEvents);
       setLastRefresh(new Date());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatError(err));
     }
   };
 
@@ -140,7 +167,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
       await invoke("delete_event", { event_id: eventId, eventId });
       loadEvents();
     } catch (err) {
-      console.error("Failed to delete event:", err);
+      setError(formatError(err));
     }
   };
 
@@ -169,7 +196,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
       }
       loadEvents();
     } catch (err) {
-      console.error("Failed to toggle pin:", err);
+      setError(formatError(err));
     }
   };
 
@@ -211,7 +238,30 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
 
       {error && (
         <div class="error-box">
-          <strong>Error:</strong> {error}
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div style="flex:1;">
+              Error:
+              <pre
+                style="
+            margin-top:8px;
+            white-space:pre-wrap;
+            word-break:break-word;
+            font-size:12px;
+            overflow:auto;
+          "
+              >
+                {error}
+              </pre>
+            </div>
+
+            <button
+              class="dismiss-btn"
+              onClick={() => setError(null)}
+              title="Dismiss error"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -282,7 +332,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
                         setTimeout(() => setClickedBtn(null), 420);
                         showToast("Copied");
                       } catch (err) {
-                        console.error("Failed to copy to clipboard:", err);
+                        setError(formatError(err));
                       }
                     }}
                     title="Copy to clipboard"

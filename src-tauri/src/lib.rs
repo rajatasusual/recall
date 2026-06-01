@@ -1,6 +1,7 @@
 use serde_json::Value;
 use tauri::{
     tray::TrayIconBuilder, Emitter, EventLoopMessage, Manager, WebviewUrl, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tauri_plugin_window_state::{Builder as WindowBuilder, StateFlags};
 use tracing_subscriber;
@@ -69,7 +70,10 @@ fn build_tray_menu(
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut item_refs: Vec<&dyn IsMenuItem<tauri_runtime_wry::Wry<EventLoopMessage>>> =
-            clip_items.iter().map(|item| item as &dyn IsMenuItem<_>).collect();
+            clip_items
+                .iter()
+                .map(|item| item as &dyn IsMenuItem<_>)
+                .collect();
 
         item_refs.push(&quit_i);
 
@@ -121,6 +125,23 @@ pub fn run() {
                 .inner_size(800.0, 600.0)
                 .build()?;
 
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_global_shortcut::ShortcutState;
+
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_shortcuts(["CmdOrCtrl+Q"])?
+                        .with_handler(|app, shortcut, event| {
+                            if event.state == ShortcutState::Pressed {
+                                println!("Global shortcut triggered: {shortcut}");
+                                app.exit(0);
+                            }
+                        })
+                        .build(),
+                )?;
+            }
+
             // Initialize database first (needed for tray menu)
             let app_dir = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&app_dir)?;
@@ -159,7 +180,8 @@ pub fn run() {
                             .unwrap_or("")
                             .parse::<usize>()
                         {
-                            let clipboard_items = db_for_menu.get_pinned_events().unwrap_or_default();
+                            let clipboard_items =
+                                db_for_menu.get_pinned_events().unwrap_or_default();
                             if let Some(rec) = clipboard_items.get(idx) {
                                 tracing::info!("Copying clipboard item {} to clipboard", idx);
                                 sources::copy_event_to_clipboard(rec, &db_for_menu, app);
@@ -201,6 +223,14 @@ pub fn run() {
 
             tracing::info!("Database initialized at {:?}", db_path);
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // Prevent actual close
+                api.prevent_close();
+                // Hide or minimize instead
+                let _ = window.minimize();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::events::get_all_events,

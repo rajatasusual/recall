@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { EventRecord } from "../types";
+import { EventHeader } from "./timeline/EventHeader";
+import { EventList } from "./timeline/EventList";
+import { ErrorBox } from "./timeline/ErrorBox";
+import { copyEventContent } from "./helpers/clipboard";
+import { formatError } from "./helpers/formatting";
 
 interface EventTimelineProps {
   refreshInterval?: number;
@@ -13,63 +18,10 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [pinnedOnly, setPinnedOnly] = useState<boolean>(false);
   const [sourceAppFilter, setSourceAppFilter] = useState<string | null>(null);
-  const [clickedBtn, setClickedBtn] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const deleteAllClickedRef = useRef<boolean>(false);
 
-  const formatError = (err: unknown): string => {
-    if (err instanceof Error) {
-      return [
-        `Message: ${err.message}`,
-        err.stack ? `\nStack:\n${err.stack}` : "",
-      ].join("");
-    }
-
-    try {
-      return JSON.stringify(err, null, 2);
-    } catch {
-      return String(err);
-    }
-  };
-
-  const copyTextToClipboard = async (text: string) => {
-    // prefer the web clipboard when available
-    try {
-      if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-      }
-    } catch (e) {
-      setError(formatError(e));
-    }
-  };
-
-  function dataUrlToBlob(dataUrl: string): Blob {
-    const [header, base64] = dataUrl.split(",");
-    const mime = header.match(/:(.*?);/)?.[1] ?? "image/png";
-
-    const bytes = atob(base64);
-    const array = new Uint8Array(bytes.length);
-
-    for (let i = 0; i < bytes.length; i++) {
-      array[i] = bytes.charCodeAt(i);
-    }
-
-    return new Blob([array], { type: mime });
-  }
-
-  const copyImageToClipboard = async (dataUrl: string) => {
-    try {
-      if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.write) {
-        const blob = dataUrlToBlob(dataUrl);
-        const item = new ClipboardItem({ [blob.type]: blob });
-        await navigator.clipboard.write([item]);
-        return;
-      }
-    } catch (e) {
-      setError(formatError(e));
-    }
-  };
   const showToast = (message: string) => {
     setToastMessage(message);
     if (toastTimerRef.current) {
@@ -84,7 +36,6 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   const loadEvents = async () => {
     setError(null);
     try {
-      // pass both snake_case and camelCase keys to be compatible with TauriJS argument mapping
       const allEvents: EventRecord[] = await invoke("get_events", {
         pinned_only: pinnedOnly,
         pinnedOnly: pinnedOnly,
@@ -127,8 +78,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   };
 
   useEffect(() => {
-    // initial load and subscribe to backend 'events:new' for near-realtime updates
-    let stop: () => void = () => { };
+    let stop: () => void = () => {};
     (async () => {
       await loadEvents();
       try {
@@ -139,10 +89,13 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
           }
         });
         stop = () => {
-          try { unlisten(); } catch (e) { /* ignore */ }
+          try {
+            unlisten();
+          } catch {
+            // ignore
+          }
         };
-      } catch (e) {
-        // if listening fails, fall back to periodic polling
+      } catch {
         const id = setInterval(() => loadEvents(), refreshInterval);
         stop = () => clearInterval(id);
       }
@@ -151,211 +104,79 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
     return () => stop();
   }, [refreshInterval, pinnedOnly, sourceAppFilter]);
 
-  const formatTimestamp = (ms: number): string => {
-    const date = new Date(ms);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    if (diff < 60000) return "just now";
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return date.toLocaleString();
+  const handlePin = async (eventId: string, isPinned: boolean) => {
+    try {
+      const action = isPinned ? "unpin_event" : "pin_event";
+      await invoke(action, { event_id: eventId, eventId });
+      await loadEvents();
+    } catch (err) {
+      setError(formatError(err));
+    }
+  };
+
+  const handleCopy = async (event: EventRecord) => {
+    try {
+      await copyEventContent(event);
+      showToast("Copied");
+    } catch (err) {
+      setError(formatError(err));
+    }
   };
 
   const handleDelete = async (eventId: string) => {
     try {
-      // some runtimes map arg names to camelCase; provide both forms
       await invoke("delete_event", { event_id: eventId, eventId });
-      loadEvents();
+      await loadEvents();
     } catch (err) {
       setError(formatError(err));
     }
   };
 
-  const handleSourceAppChange = (e: Event) => {
-    const select = e.currentTarget as HTMLSelectElement;
-    setSourceAppFilter(select.value || null);
-  };
-  const getPayloadPreview = (payload: Record<string, any>): string => {
-    if (payload.type === "clipboard_image") {
-      // payload.preview should be a data URL (small PNG)
-      return payload.preview || "[image]";
-    }
-
-    if (payload.content) {
-      return payload.content.substring(0, 80);
-    }
-    return JSON.stringify(payload).substring(0, 80);
-  };
-
-  const handlePin = async (eventId: string, isPinned: boolean) => {
+  const handleDeleteAll = async () => {
+    deleteAllClickedRef.current = true;
+    setTimeout(() => {
+      deleteAllClickedRef.current = false;
+    }, 420);
     try {
-      if (isPinned) {
-        await invoke("unpin_event", { event_id: eventId, eventId });
-      } else {
-        await invoke("pin_event", { event_id: eventId, eventId });
-      }
-      loadEvents();
+      await invoke("delete_all_events");
+      await loadEvents();
+      showToast("All unpinned events deleted.");
     } catch (err) {
       setError(formatError(err));
     }
+  };
+
+  const handlePinnedOnlyChange = (value: boolean) => {
+    setPinnedOnly(value);
+  };
+
+  const handleSourceAppChange = (app: string | null) => {
+    setSourceAppFilter(app);
   };
 
   return (
     <div class="event-timeline">
-      <div class="timeline-header">
-        <div class="header-top">
-          <div style="display:flex;gap:8px;align-items:center">
-            <label style="font-size:12px;color:var(--muted)">
-              <input type="checkbox" checked={pinnedOnly} onChange={() => setPinnedOnly(!pinnedOnly)} />
-              &nbsp;Pinned only
-            </label>
-            <select onChange={handleSourceAppChange} value={sourceAppFilter ?? ""}>
-              <option value="">All apps</option>
-              {Array.from(new Set(events.map(ev => ev.source_app).filter(Boolean) as string[])).map((app) => (
-                <option value={String(app)}>{String(app)}</option>
-              ))}
-            </select>
-            <span class="event-count">
-              {events.length} item{events.length !== 1 ? "s" : ""}
-            </span>
-            <span class="last-refresh" style="font-size:12px;color:var(--muted);margin-left:8px">Last: {lastRefresh.toLocaleTimeString()}</span>
-            {toastMessage && (
-              <span class="toast">{toastMessage}</span>
-            )}
-          </div>
-          <div>
-            <button class="delete-all-btn" onClick={() => {
-              setClickedBtn(`delete_all`);
-              setTimeout(() => setClickedBtn(null), 420);
-              invoke("delete_all_events").then(() => loadEvents());
-              setToastMessage("All unpinned events deleted.");
-            }}>
-              🧹
-            </button>
-          </div>
-        </div>
-      </div>
+      <EventHeader
+        events={events}
+        pinnedOnly={pinnedOnly}
+        sourceAppFilter={sourceAppFilter}
+        lastRefresh={lastRefresh}
+        toastMessage={toastMessage}
+        onPinnedOnlyChange={handlePinnedOnlyChange}
+        onSourceAppChange={handleSourceAppChange}
+        onDeleteAll={handleDeleteAll}
+        deleteAllClicked={deleteAllClickedRef.current}
+      />
 
-      {error && (
-        <div class="error-box">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <div style="flex:1;">
-              Error:
-              <pre
-                style="
-            margin-top:8px;
-            white-space:pre-wrap;
-            word-break:break-word;
-            font-size:12px;
-            overflow:auto;
-          "
-              >
-                {error}
-              </pre>
-            </div>
+      <ErrorBox error={error} onDismiss={() => setError(null)} />
 
-            <button
-              class="dismiss-btn"
-              onClick={() => setError(null)}
-              title="Dismiss error"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div class="events-list">
-        {events.length === 0 ? (
-          <div class="empty-state">
-            Waiting for clipboard events...
-          </div>
-        ) : (
-          <div class="events-container">
-            {events.map((event) => (
-              <div key={event.id} class={`event-item ${event.pinned ? "pinned" : ""}`}>
-                <div class="event-header">
-                  <div class="event-meta">
-                    <span class="time" title={new Date(event.timestamp).toLocaleString()}>
-                      {formatTimestamp(event.timestamp)}
-                    </span>
-                    {event.source_app && (
-                      <span class="app-context">{event.source_app}</span>
-                    )}
-                    {event.payload.is_truncated && (
-                      <span class="truncation-badge">truncated</span>
-                    )}
-                  </div>
-                </div>
-                <div class="event-content">
-                  {event.payload.type === "clipboard_image" ? (
-                    event.payload.preview ? (
-                      // render small preview image
-                      <img src={event.payload.preview} alt="clipboard" style="max-width:80px;max-height:80px;border-radius:6px" />
-                    ) : (
-                      <span>[image]</span>
-                    )
-                  ) : (
-                    <>
-                      {getPayloadPreview(event.payload)}
-                      {event.payload.content && event.payload.content.length > 80 && "..."}
-                    </>
-                  )}
-                </div>
-                <div class="event-actions">
-                  <button
-                    class={`pin-btn ${event.pinned ? "pinned" : ""} ${clickedBtn === `${event.id}:pin` ? 'clicked' : ''}`}
-                    onClick={() => {
-                      setClickedBtn(`${event.id}:pin`);
-                      setTimeout(() => setClickedBtn(null), 420);
-                      handlePin(event.id, event.pinned);
-                    }}
-                    title={event.pinned ? "Unpin" : "Pin"}
-                  >
-                    {event.pinned ? "📌" : "📍"}
-                  </button>
-                  <button
-                    class={`copy-btn ${clickedBtn === `${event.id}:copy` ? 'clicked' : ''}`}
-                    onClick={async () => {
-                      try {
-                        let content: string;
-                        if (event.payload.type === "clipboard_image") {
-                          content = event.payload.preview ?? event.content_hash ?? JSON.stringify(event.payload);
-                          await copyImageToClipboard(content);
-
-                        } else {
-                          content = event.payload?.content ?? JSON.stringify(event.payload);
-                          await copyTextToClipboard(String(content));
-
-                        }
-                        setClickedBtn(`${event.id}:copy`);
-                        setTimeout(() => setClickedBtn(null), 420);
-                        showToast("Copied");
-                      } catch (err) {
-                        setError(formatError(err));
-                      }
-                    }}
-                    title="Copy to clipboard"
-                  >
-                    Copy
-                  </button>
-                  <button
-                    class={`delete-btn ${clickedBtn === `${event.id}:delete` ? 'clicked' : ''}`}
-                    onClick={() => {
-                      setClickedBtn(`${event.id}:delete`);
-                      setTimeout(() => setClickedBtn(null), 420);
-                      handleDelete(event.id);
-                    }}
-                    title="Delete"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <EventList
+        events={events}
+        onPin={handlePin}
+        onCopy={handleCopy}
+        onDelete={handleDelete}
+      />
     </div>
   );
 }
+

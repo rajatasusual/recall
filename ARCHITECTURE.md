@@ -7,20 +7,29 @@ Recall is a Tauri desktop app with a Rust backend and a Preact frontend. The bac
 ## High-level components
 
 - Frontend (Preact/TypeScript)
-  - `src/components/EventTimeline.tsx` — main UI: lists events, supports pin/unpin, delete, copy, and filtering by pinned or source app.
-  - `src/styles/EventTimeline.css` — styling for the timeline and items.
+  - `src/components/EventTimeline.tsx` — root component managing state, event loading, filtering, and orchestrating subcomponents.
+  - `src/components/timeline/` — modular subcomponents:
+    - `EventHeader.tsx` — filter controls, event count, and delete-all action.
+    - `EventList.tsx` — container component for the event list.
+    - `EventItem.tsx` — individual event display (timestamp, app, preview, content).
+    - `EventActions.tsx` — action buttons with local click-animation state management.
+    - `ErrorBox.tsx` — error display and dismissal.
+  - `src/components/helpers/` — utility modules:
+    - `clipboard.ts` — clipboard read/write helpers using the web Clipboard API.
+    - `formatting.ts` — timestamp formatting, payload preview extraction, error formatting, and utility functions.
+  - `src/styles/EventTimeline.css` — styling for the timeline and UI components.
   - `src/types.ts` — shared type definitions for the frontend.
 
 - Backend (Rust/Tauri)
   - `core` — `Event` struct and `EventPayload` enum. `EventPayload` supports `ClipboardText` and `ClipboardImage` variants. Key event fields: `id`, `timestamp`, `source`, `payload`, `window_title`, `source_app`, `pinned`.
-  - `sources` — clipboard watcher (`sources/clipboard.rs`) polls the system clipboard using `arboard`. Refactored with helper functions (`process_text`, `process_image`, `emit_content`) for code reuse:
+  - `sources` — clipboard watcher (`sources/clipboard.rs`) polls the system clipboard using `tauri-plugin-clipboard-manager` (plugin API initialized in `lib.rs`). Refactored with helper functions (`process_text`, `process_image`, `emit_content`) for code reuse:
     - Text: computes xxHash64 `content_hash`, handles truncation if >50KB.
     - Image: encodes PNG, generates base64 data URL preview (max 512×512px), computes hash of full PNG bytes.
     - Both: deduplicated via `content_exists()` check before emission.
     - Captures context (frontmost app and window title on macOS via `osascript`).
   - `storage` — DB layer (`db.rs`) and schema (`schema.rs`) manage `events`, `blobs`, and `edges` tables. `EventWriter` batches writes for efficiency and creates temporal edges between consecutive events. Blob insertion is best-effort to avoid blocking event writes.
   - `commands` — Tauri-invokable handlers that map to storage operations (get, filter, pin/unpin, delete).
-  - `lib.rs` — application bootstrap and tray menu wiring. The tray menu now exposes the last 10 pinned clipboard items and restores clipboard contents using native clipboard copy; image restore reads stored PNG blobs and writes native image data via `arboard`.
+  - `lib.rs` — application bootstrap and tray menu wiring. The tray menu now exposes the last 10 pinned clipboard items and restores clipboard contents using the plugin API (`clipboard.write_text()`, `clipboard.write_image()`); image restore reads stored PNG blobs and writes native image data via the plugin.
 
 ## Database schema
 

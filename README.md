@@ -24,7 +24,7 @@ npm run tauri dev
 - Database file: stored in the platform app data directory as `events.db` (SQLite, WAL mode).
 - Main backend modules:
   - `core` — event model (`Event`), payloads and helpers
-  - `sources` — clipboard polling with `arboard` and capture; runs in a fast, non-blocking background task and captures app/window context on macOS
+  - `sources` — clipboard polling via `tauri-plugin-clipboard-manager` and capture; runs in a fast, non-blocking background task and captures app/window context on macOS
   - `storage` — DB wrapper, schema, and batched EventWriter; emits `events:new` to the frontend on new inserts
   - `commands` — Tauri command handlers invoked by the frontend
 
@@ -45,7 +45,16 @@ npm run tauri dev
 Frontend (src)
 
 - Preact + TypeScript UI lives in `src/` and components are under `src/components/`.
-- `EventTimeline` is the main view: supports filtering by pinned and by application, pin/unpin, delete, copy back to clipboard, and shows a small toast on copy.
+- **Main component**: `EventTimeline` is the composable root view that coordinates state and event handling.
+- **Subcomponents** (in `src/components/timeline/`):
+  - `EventHeader` — filtering controls, event count, last refresh time, delete-all button, and toast messages
+  - `EventList` — container for rendering the event list
+  - `EventItem` — individual event display with timestamp, app context, content preview
+  - `EventActions` — action buttons (pin, copy, delete) with internal click animation state
+  - `ErrorBox` — error display with dismiss button
+- **Helpers** (in `src/components/helpers/`):
+  - `clipboard.ts` — clipboard operations (`copyTextToClipboard`, `copyImageToClipboard`, `copyEventContent`)
+  - `formatting.ts` — utilities for formatting timestamps, payload previews, and error messages
 - System tray menu: the last 10 pinned clipboard items are surfaced in the tray menu for quick restore back to the system clipboard.
 - **Image preview**: When an event payload type is `clipboard_image`, the UI renders an inline image preview (max 240×240px) sourced from the preview data URL stored in the event.
 

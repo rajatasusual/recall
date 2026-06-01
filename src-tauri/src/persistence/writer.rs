@@ -1,3 +1,4 @@
+use crate::config::WriterConfig;
 use crate::core::Event;
 use crate::persistence::{Database, StorageResult};
 use std::sync::Arc;
@@ -7,27 +8,6 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
-
-/// Configuration for batch writes
-#[derive(Debug, Clone)]
-pub struct WriterConfig {
-    /// Buffer size before forced flush (events)
-    pub batch_size: usize,
-    /// Time-based flush interval
-    pub flush_interval_ms: u64,
-    /// Max queue size before dropping
-    pub max_queue_size: usize,
-}
-
-impl Default for WriterConfig {
-    fn default() -> Self {
-        Self {
-            batch_size: 50,
-            flush_interval_ms: 200,
-            max_queue_size: 10_000,
-        }
-    }
-}
 
 /// Event writer with batching and backpressure
 #[derive(Clone)]

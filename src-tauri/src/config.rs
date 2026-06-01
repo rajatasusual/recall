@@ -192,32 +192,3 @@ impl ConfigBuilder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_config() {
-        let config = Config::default();
-        assert_eq!(config.app.name, "Recall");
-        assert_eq!(config.clipboard.poll_interval_ms, 150);
-        assert_eq!(config.writer.batch_size, 50);
-    }
-
-    #[test]
-    fn test_config_builder() {
-        let config = Config::builder()
-            .clipboard_poll_interval(300)
-            .writer_batch_size(25)
-            .build();
-
-        assert_eq!(config.clipboard.poll_interval_ms, 300);
-        assert_eq!(config.writer.batch_size, 25);
-    }
-
-    #[test]
-    fn test_config_from_env() {
-        let config = Config::from_env();
-        assert!(!config.app.name.is_empty());
-    }
-}

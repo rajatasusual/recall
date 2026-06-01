@@ -3,6 +3,7 @@
 //! This module handles clipboard monitoring and content processing,
 //! independent of persistence details (which are handled in the API/persistence layers).
 
+use crate::config::ClipboardConfig;
 use crate::core::Event;
 use crate::core::{EventPayload, EventSource};
 use crate::domain::EventRecord;
@@ -19,11 +20,6 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_runtime_wry::Wry;
 use tracing::{error, warn};
 use xxhash_rust::xxh3::xxh3_64;
-
-const CLIPBOARD_POLL_INTERVAL_MS: u64 = 150;
-const MAX_CLIPBOARD_PAYLOAD_BYTES: usize = 50 * 1024;
-const CLIPBOARD_PREVIEW_CHARS: usize = 2048;
-const PREVIEW_MAX_DIM: u32 = 512;
 
 /// Result of processing clipboard content
 enum ClipboardContent {
@@ -127,7 +123,7 @@ fn get_active_app_and_window() -> (Option<String>, Option<String>) {
 }
 
 /// Process text from clipboard into ClipboardContent
-fn process_text(text: &str) -> Option<ClipboardContent> {
+fn process_text(text: &str, config: &ClipboardConfig) -> Option<ClipboardContent> {
     let trimmed = text.trim();
     if trimmed.is_empty() || trimmed.starts_with("clipboard_") {
         return None;
@@ -136,11 +132,11 @@ fn process_text(text: &str) -> Option<ClipboardContent> {
     let content_hash = xxh3_64(trimmed.as_bytes());
     let hash_string = format!("{content_hash:016x}");
 
-    let (stored_content, is_truncated) = if trimmed.len() > MAX_CLIPBOARD_PAYLOAD_BYTES {
+    let (stored_content, is_truncated) = if trimmed.len() > config.max_payload_bytes {
         (
             trimmed
                 .chars()
-                .take(CLIPBOARD_PREVIEW_CHARS)
+                .take(config.preview_chars)
                 .collect::<String>(),
             true,
         )
@@ -156,7 +152,7 @@ fn process_text(text: &str) -> Option<ClipboardContent> {
 }
 
 /// Process image from clipboard into ClipboardContent
-fn process_image(image: tauri::image::Image<'_>) -> Option<ClipboardContent> {
+fn process_image(image: tauri::image::Image<'_>, config: &ClipboardConfig) -> Option<ClipboardContent> {
     tracing::debug!(
         "processing image: {}x{}, {} bytes",
         image.width(),
@@ -191,7 +187,7 @@ fn process_image(image: tauri::image::Image<'_>) -> Option<ClipboardContent> {
         )
         .ok()?;
 
-    let preview = dyn_img.resize(PREVIEW_MAX_DIM, PREVIEW_MAX_DIM, FilterType::Lanczos3);
+    let preview = dyn_img.resize(config.preview_max_dim, config.preview_max_dim, FilterType::Lanczos3);
     let mut preview_buf = Vec::new();
     preview
         .write_to(
@@ -240,9 +236,9 @@ fn emit_content(
 pub async fn start_clipboard_watcher(
     writer: Arc<EventWriter>,
     app_handle: AppHandle<Wry<EventLoopMessage>>,
-    interval_ms: u64,
+    config: ClipboardConfig,
 ) {
-    let poll_interval = Duration::from_millis(interval_ms.max(CLIPBOARD_POLL_INTERVAL_MS));
+    let poll_interval = Duration::from_millis(config.poll_interval_ms);
 
     thread::spawn(move || {
         let clipboard = app_handle.clipboard();
@@ -254,7 +250,7 @@ pub async fn start_clipboard_watcher(
             // Try text first
             match clipboard.read_text() {
                 Ok(contents) => {
-                    if let Some(content) = process_text(&contents) {
+                    if let Some(content) = process_text(&contents, &config) {
                         let hash = content.hash().to_string();
 
                         if last_hash.as_deref() != Some(&hash) {
@@ -279,7 +275,7 @@ pub async fn start_clipboard_watcher(
                                 image.rgba().len()
                             );
 
-                            if let Some(content) = process_image(image) {
+                            if let Some(content) = process_image(image, &config) {
                                 let image_hash = content.hash().to_string();
 
                                 if last_hash.as_deref() != Some(&image_hash) {

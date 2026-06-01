@@ -19,6 +19,8 @@ mod error;
 
 pub use error::{AppError, AppResult};
 
+use crate::config::{ClipboardConfig, WriterConfig};
+
 type AppMenu = tauri::menu::Menu<tauri_runtime_wry::Wry<EventLoopMessage>>;
 type AppTrayIcon = tauri::tray::TrayIcon<tauri_runtime_wry::Wry<EventLoopMessage>>;
 
@@ -153,10 +155,12 @@ pub fn run() {
             // Initialize database first (needed for tray menu)
             let app_dir = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&app_dir)?;
+            
+            let db_config = config::StorageConfig::default();
 
-            let db_path = app_dir.join("events.db");
+            let db_path = app_dir.join(db_config.database_path.clone());
             let db = std::sync::Arc::new(
-                persistence::Database::open(&db_path).expect("Failed to open database"),
+                persistence::Database::open(&db_path, db_config).expect("Failed to open database"),
             );
 
             db.init_schema()
@@ -207,7 +211,7 @@ pub fn run() {
             // Initialize event writer
             let writer = std::sync::Arc::new(persistence::EventWriter::new(
                 db.clone(),
-                persistence::writer::WriterConfig::default(),
+                WriterConfig::default(),
                 Some(app.handle().clone()),
             ));
 
@@ -223,7 +227,7 @@ pub fn run() {
             let clipboard_writer = writer.clone();
             let clipboard_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                domain::clipboard::start_clipboard_watcher(clipboard_writer, clipboard_app_handle, 400).await;
+                domain::clipboard::start_clipboard_watcher(clipboard_writer, clipboard_app_handle, ClipboardConfig::default()).await;
             });
 
             app.manage(db.clone());

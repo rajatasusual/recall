@@ -1,5 +1,6 @@
+use crate::config::StorageConfig;
 use crate::domain::EventRecord;
-use crate::persistence::{StorageResult, schema};
+use crate::persistence::{schema, StorageResult};
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -11,19 +12,26 @@ pub struct Database {
 
 impl Database {
     /// Create or open a database at the given path
-    pub fn open(path: impl AsRef<Path>) -> StorageResult<Self> {
+    pub fn open(path: impl AsRef<Path>, config: StorageConfig) -> StorageResult<Self> {
         let conn = Connection::open(path)?;
+        let mut pragmas = String::new();
 
-        // Enable WAL mode for crash safety
-        conn.execute_batch("PRAGMA journal_mode = WAL;")?;
-        conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
-        conn.execute_batch("PRAGMA cache_size = -64000;")?; // 64MB cache
+        if config.enable_wal {
+            pragmas.push_str(
+                r#"
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            "#,
+            );
+        }
+
+        pragmas.push_str(&format!("PRAGMA cache_size = {};", config.cache_size));
+        conn.execute_batch(&pragmas)?;
 
         Ok(Database {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
-
     /// Initialize schema on database
     pub fn init_schema(&self) -> StorageResult<()> {
         let conn = self.conn.lock().unwrap();

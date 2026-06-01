@@ -1,8 +1,8 @@
+use crate::core::{Event, EventPayload, EventSource};
+use crate::storage::{db::EventRecord, Database};
+use std::sync::Arc;
 use tauri::State;
 use xxhash_rust::xxh3::xxh3_64;
-use std::sync::Arc;
-use crate::storage::{Database, db::EventRecord};
-use crate::core::{Event, EventSource, EventPayload};
 
 /// Helper function to convert EventRecord to JSON
 fn event_record_to_json(event: EventRecord) -> Result<serde_json::Value, String> {
@@ -23,7 +23,11 @@ fn event_record_to_json(event: EventRecord) -> Result<serde_json::Value, String>
 
 /// Get events with optional filters
 #[tauri::command]
-pub fn get_events(pinned_only: Option<bool>, source_app: Option<String>, db: State<'_, Arc<Database>>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_events(
+    pinned_only: Option<bool>,
+    source_app: Option<String>,
+    db: State<'_, Arc<Database>>,
+) -> Result<Vec<serde_json::Value>, String> {
     let source_app_ref = source_app.as_deref();
     db.get_events(pinned_only, source_app_ref)
         .map_err(|e| e.to_string())?
@@ -79,14 +83,26 @@ pub fn get_pinned_events(db: State<'_, Arc<Database>>) -> Result<Vec<serde_json:
 
 /// Pin an event
 #[tauri::command]
-pub fn pin_event(event_id: String, db: State<'_, Arc<Database>>) -> Result<(), String> {
-    db.pin_event(&event_id).map_err(|e| e.to_string())
+pub fn pin_event(
+    event_id: String,
+    db: State<'_, Arc<Database>>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    db.pin_event(&event_id).map_err(|e| e.to_string())?;
+    crate::refresh_tray_menu(&app).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Unpin an event
 #[tauri::command]
-pub fn unpin_event(event_id: String, db: State<'_, Arc<Database>>) -> Result<(), String> {
-    db.unpin_event(&event_id).map_err(|e| e.to_string())
+pub fn unpin_event(
+    event_id: String,
+    db: State<'_, Arc<Database>>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    db.unpin_event(&event_id).map_err(|e| e.to_string())?;
+    crate::refresh_tray_menu(&app).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Get count of all events
@@ -109,10 +125,10 @@ pub fn test_insert_clipboard_event(
             content_hash: format!("{:x}", xxh3_64(content.as_bytes())),
         },
     );
-    
+
     let event_id = event.id.clone();
     let content_hash = format!("{:x}", xxh3_64(content.as_bytes()));
-    
+
     db.insert_event(
         &event.id,
         event.timestamp,
@@ -122,7 +138,8 @@ pub fn test_insert_clipboard_event(
         None,
         None,
         Some(&content_hash),
-    ).map_err(|e| e.to_string())?;
-    
+    )
+    .map_err(|e| e.to_string())?;
+
     Ok(event_id)
 }

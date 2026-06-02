@@ -1,5 +1,6 @@
 use crate::config::WriterConfig;
 use crate::core::Event;
+use crate::domain::EventRecord;
 use crate::persistence::{Database, StorageResult};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -174,7 +175,8 @@ impl EventWriter {
         let elapsed = start.elapsed().as_millis();
         tracing::info!(
             "db_write_batch_complete: batch_size={}, elapsed_ms={}",
-            batch_size, elapsed
+            batch_size,
+            elapsed
         );
 
         batch.clear();
@@ -206,16 +208,25 @@ impl EventWriter {
             }
         };
 
-        db.insert_event(
-            &event.id,
-            event.timestamp,
-            event.source.as_str(),
-            event.payload.payload_type(),
-            &payload_data,
-            event.window_title.as_deref(),
-            event.source_app.as_deref(),
-            content_hash,
-        )?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        let event_record = EventRecord {
+            id: event.id.clone(),
+            timestamp: event.timestamp,
+            source: event.source.as_str().to_string(),
+            payload_type: event.payload.payload_type().to_string(),
+            payload_data,
+            window_title: event.window_title.clone(),
+            source_app: event.source_app.clone(),
+            content_hash: content_hash.map(str::to_string),
+            pinned: false,
+            created_at: now,
+        };
+
+        db.insert_event(&event_record)?;
 
         tracing::debug!(
             "event_ingested: event_id={}, source={}",

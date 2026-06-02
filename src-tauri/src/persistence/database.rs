@@ -52,31 +52,38 @@ impl Database {
     }
 
     /// Insert an event into the database
-    pub fn insert_event(
-        &self,
-        id: &str,
-        timestamp: i64,
-        source: &str,
-        payload_type: &str,
-        payload_data: &str,
-        window_title: Option<&str>,
-        source_app: Option<&str>,
-        content_hash: Option<&str>,
-    ) -> StorageResult<()> {
+    pub fn insert_event(&self, event: &EventRecord) -> StorageResult<()> {
         let conn = self.conn.lock().unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
 
         conn.execute(
-            "INSERT INTO events (id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
-            params![id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, now],
+            "INSERT INTO events (
+            id,
+            timestamp,
+            source,
+            payload_type,
+            payload_data,
+            window_title,
+            source_app,
+            content_hash,
+            pinned,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                &event.id,
+                event.timestamp,
+                &event.source,
+                &event.payload_type,
+                &event.payload_data,
+                event.window_title.as_deref(),
+                event.source_app.as_deref(),
+                event.content_hash.as_deref(),
+                event.pinned,
+                event.created_at,
+            ],
         )?;
+
         Ok(())
     }
-
     /// Insert a binary blob (e.g., image) referenced by content_hash
     pub fn insert_blob(&self, content_hash: &str, mime: &str, data: &[u8]) -> StorageResult<()> {
         let conn = self.conn.lock().unwrap();

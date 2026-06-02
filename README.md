@@ -1,6 +1,7 @@
 # Recall — Intelligent Clipboard
 
-## Brief
+<img src="image.png" alt="recall" width="64"/>
+
 Recall captures clipboard items (text and images), stores them locally, and provides a Tauri + Preact UI to browse, pin, filter and restore clipboard entries.
 Architecture has been refactored into a **layered system**:
 - Domain layer (core types)
@@ -8,18 +9,21 @@ Architecture has been refactored into a **layered system**:
 - Persistence layer (SQLite + blobs)
 - API layer (Tauri command boundary)
 This separation improves testability, modularity, and alignment with Tauri v2 best practices.
+
+<img src="screenshot.png" alt="recall" width="600"/>
+
 ---
 ## Quick start (development)
-```bash
+
 npm install
-npm run dev
+cd src-tauri/
 npm run tauri dev
 
 ⸻
 
-Backend architecture (Rust)
+## Backend architecture (Rust)
 
-Layers
+### Layers
 
 1. API layer (api/)
 
@@ -53,7 +57,7 @@ Layers
 
 ⸻
 
-Clipboard event flow
+### Clipboard event flow
 
 1. Clipboard polling detects change
 2. Domain converts raw input → ClipboardContent
@@ -65,7 +69,7 @@ Clipboard event flow
 
 ⸻
 
-Available Tauri commands
+### Available Tauri commands
 
 All commands are service-backed:
 
@@ -80,7 +84,7 @@ All commands are service-backed:
 
 ⸻
 
-Frontend (src)
+## Frontend (src)
 
 Unchanged UI structure:
 
@@ -98,7 +102,7 @@ Helpers:
 
 ⸻
 
-Key improvements (post-refactor)
+#### Key improvements (post-refactor)
 
 Architecture
 
@@ -134,7 +138,7 @@ All remain backward compatible.
 
 ⸻
 
-Next steps
+## Next steps
 
 * Complete migration of remaining core logic into domain layer
 * Introduce repository traits for persistence abstraction

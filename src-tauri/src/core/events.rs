@@ -48,7 +48,7 @@ impl EventSource {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_string(s: &str) -> Option<Self> {
         match s {
             "clipboard" => Some(EventSource::Clipboard),
             _ => None,

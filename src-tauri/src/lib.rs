@@ -4,7 +4,6 @@ use tauri::{
     WindowEvent,
 };
 use tauri_plugin_window_state::{Builder as WindowBuilder, StateFlags};
-use tracing_subscriber;
 
 // New module structure (Phase 2)
 pub mod config;
@@ -170,7 +169,7 @@ pub fn run() {
 
             // Get recent clipboard items
             let menu_handle = app.handle();
-            let menu = build_tray_menu(&menu_handle, &db)?;
+            let menu = build_tray_menu(menu_handle, &db)?;
 
             // Clone db for the menu event handler
             let db_for_menu = db.clone();

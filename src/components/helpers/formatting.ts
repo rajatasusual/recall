@@ -56,3 +56,12 @@ export function getUniqueSourceApps(events: EventRecord[]): string[] {
     new Set(events.map(ev => ev.source_app).filter(Boolean) as string[])
   );
 }
+
+/**
+ * Get classifications from a list of events
+ */
+export function getClassifications(events: EventRecord[]): string[] {
+  return Array.from(
+    new Set(events.map(ev => ev.classification).filter(Boolean) as string[])
+  );
+}

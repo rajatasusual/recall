@@ -33,7 +33,7 @@ fn build_tray_menu(
     app: &tauri::AppHandle,
     db: &std::sync::Arc<persistence::Database>,
 ) -> tauri::Result<AppMenu> {
-    let clipboard_items = db.get_events(Some(true), None).unwrap_or_default();
+    let clipboard_items = db.get_events(Some(true), None, None).unwrap_or_default();
 
     let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
@@ -193,7 +193,7 @@ pub fn run() {
                             .parse::<usize>()
                         {
                             let clipboard_items =
-                                db_for_menu.get_events(Some(true), None).unwrap_or_default();
+                                db_for_menu.get_events(Some(true), None, None).unwrap_or_default();
                             if let Some(rec) = clipboard_items.get(idx) {
                                 tracing::info!("Copying clipboard item {} to clipboard", idx);
                                 domain::clipboard::copy_event_to_clipboard(rec, &db_for_menu, app);

@@ -131,10 +131,10 @@ impl Database {
         &self,
         pinned_only: Option<bool>,
         source_app: Option<&str>,
+        classification: Option<&str>,
     ) -> StorageResult<Vec<EventRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut sql = String::from("SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at, classification FROM events");
-        let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
         let mut param_values: Vec<String> = Vec::new();
         let mut where_clauses: Vec<String> = Vec::new();
 
@@ -145,7 +145,11 @@ impl Database {
         if let Some(app) = source_app {
             where_clauses.push("source_app = ?".to_string());
             param_values.push(app.to_string());
-            params_vec.push(param_values.last().unwrap());
+        }
+
+        if let Some(class) = classification {
+            where_clauses.push("classification = ?".to_string());
+            param_values.push(class.to_string());
         }
 
         if !where_clauses.is_empty() {
@@ -158,8 +162,8 @@ impl Database {
         let mut stmt = conn.prepare(&sql)?;
 
         let mut result = Vec::new();
-        if params_vec.is_empty() {
-            let rows = stmt.query_map([], |row| {
+        if param_values.is_empty() {
+            let rows = stmt.query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
                 Ok(EventRecord {
                     id: row.get(0)?,
                     timestamp: row.get(1)?,
@@ -179,7 +183,7 @@ impl Database {
                 result.push(event?);
             }
         } else {
-            let rows = stmt.query_map(params_vec.as_slice(), |row| {
+            let rows = stmt.query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
                 Ok(EventRecord {
                     id: row.get(0)?,
                     timestamp: row.get(1)?,

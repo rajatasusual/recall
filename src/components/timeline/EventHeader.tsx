@@ -1,15 +1,17 @@
 import { VNode } from "preact";
 import { EventRecord } from "../../types";
-import { getUniqueSourceApps } from "../helpers/formatting";
+import { getClassifications, getUniqueSourceApps } from "../helpers/formatting";
 
 interface EventHeaderProps {
   events: EventRecord[];
   pinnedOnly: boolean;
   sourceAppFilter: string | null;
+  classificationFilter: string | null;
   lastRefresh: Date;
   toastMessage: string | null;
   onPinnedOnlyChange: (value: boolean) => void;
   onSourceAppChange: (app: string | null) => void;
+  onClassificationChange: (classification: string | null) => void;
   onDeleteAll: () => void;
   deleteAllClicked: boolean;
 }
@@ -18,15 +20,22 @@ export function EventHeader({
   events,
   pinnedOnly,
   sourceAppFilter,
+  classificationFilter,
   lastRefresh,
   toastMessage,
   onPinnedOnlyChange,
   onSourceAppChange,
+  onClassificationChange,
   onDeleteAll,
   deleteAllClicked,
 }: EventHeaderProps): VNode {
   const sourceApps = getUniqueSourceApps(events);
+  const classifications = getClassifications(events);
 
+  const handleClassificationSelect = (e: Event) => {
+    const select = e.currentTarget as HTMLSelectElement;
+    onClassificationChange(select.value || null);
+  };
   const handleSourceAppSelect = (e: Event) => {
     const select = e.currentTarget as HTMLSelectElement;
     onSourceAppChange(select.value || null);
@@ -49,6 +58,13 @@ export function EventHeader({
             <option value="">All apps</option>
             {sourceApps.map((app) => (
               <option value={app}>{app}</option>
+            ))}
+          </select>
+          
+          <select onChange={handleClassificationSelect} value={classificationFilter ?? ""}>
+            <option value="">All classes</option>
+            {classifications.map((classification) => (
+              <option value={classification}>{classification}</option>
             ))}
           </select>
           

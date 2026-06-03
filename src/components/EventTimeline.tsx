@@ -18,6 +18,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [pinnedOnly, setPinnedOnly] = useState<boolean>(false);
   const [sourceAppFilter, setSourceAppFilter] = useState<string | null>(null);
+  const [classificationFilter, setClassificationFilter] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const deleteAllClickedRef = useRef<boolean>(false);
@@ -40,7 +41,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
         pinned_only: pinnedOnly,
         pinnedOnly: pinnedOnly,
         source_app: sourceAppFilter,
-        sourceApp: sourceAppFilter,
+        classification: classificationFilter,
       });
       setEvents(allEvents);
       setLastRefresh(new Date());
@@ -54,6 +55,9 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
       return;
     }
     if (sourceAppFilter && newEvent.source_app !== sourceAppFilter) {
+      return;
+    }
+    if (classificationFilter && newEvent.classification !== classificationFilter) {
       return;
     }
 
@@ -102,7 +106,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
     })();
 
     return () => stop();
-  }, [refreshInterval, pinnedOnly, sourceAppFilter]);
+  }, [refreshInterval, pinnedOnly, sourceAppFilter, classificationFilter]);
 
   const handlePin = async (eventId: string, isPinned: boolean) => {
     try {
@@ -154,16 +158,22 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
     setSourceAppFilter(app);
   };
 
+  const handleClassificationChange = (classification: string | null) => {
+    setClassificationFilter(classification);
+  };
+
   return (
     <div class="event-timeline">
       <EventHeader
         events={events}
         pinnedOnly={pinnedOnly}
         sourceAppFilter={sourceAppFilter}
+        classificationFilter={classificationFilter}
         lastRefresh={lastRefresh}
         toastMessage={toastMessage}
         onPinnedOnlyChange={handlePinnedOnlyChange}
         onSourceAppChange={handleSourceAppChange}
+        onClassificationChange={handleClassificationChange}
         onDeleteAll={handleDeleteAll}
         deleteAllClicked={deleteAllClickedRef.current}
       />

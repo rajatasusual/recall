@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Unified event model for all system events
@@ -27,7 +27,11 @@ impl Event {
         }
     }
 
-    pub fn with_context(mut self, window_title: Option<String>, source_app: Option<String>) -> Self {
+    pub fn with_context(
+        mut self,
+        window_title: Option<String>,
+        source_app: Option<String>,
+    ) -> Self {
         self.window_title = window_title;
         self.source_app = source_app;
         self
@@ -38,7 +42,7 @@ impl Event {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EventSource {
-    Clipboard
+    Clipboard,
 }
 
 impl EventSource {
@@ -64,6 +68,7 @@ pub enum EventPayload {
         content: String,
         is_truncated: bool,
         content_hash: String,
+        classification: String,
     },
     ClipboardImage {
         content_hash: String,
@@ -80,6 +85,13 @@ impl EventPayload {
         match self {
             EventPayload::ClipboardText { .. } => "clipboard_text",
             EventPayload::ClipboardImage { .. } => "clipboard_image",
+        }
+    }
+
+    pub fn classification(&self) -> Option<&str> {
+        match self {
+            EventPayload::ClipboardText { classification, .. } => Some(classification),
+            _ => None,
         }
     }
 }

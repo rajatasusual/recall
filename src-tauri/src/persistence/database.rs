@@ -44,6 +44,15 @@ impl Database {
         Arc::clone(&self.conn)
     }
 
+    pub fn drop_database(&self) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DROP TABLE IF EXISTS events", [])?;
+        conn.execute("DROP TABLE IF EXISTS blobs", [])?;
+        conn.execute("DROP TABLE IF EXISTS edges", [])?;
+        conn.execute("DROP TABLE IF EXISTS metadata", [])?;
+        Ok(())
+    }
+
     /// Execute a query returning number of rows affected
     pub fn execute(&self, sql: &str, params: &[&dyn rusqlite::ToSql]) -> StorageResult<usize> {
         let conn = self.conn.lock().unwrap();
@@ -66,8 +75,9 @@ impl Database {
             source_app,
             content_hash,
             pinned,
-            created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            created_at,
+            classification
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 &event.id,
                 event.timestamp,
@@ -79,6 +89,7 @@ impl Database {
                 event.content_hash.as_deref(),
                 event.pinned,
                 event.created_at,
+                &event.classification,
             ],
         )?;
 
@@ -115,35 +126,6 @@ impl Database {
         Ok(())
     }
 
-    /// Get all events with full metadata ordered by timestamp (descending)
-    pub fn get_all_events_full(&self) -> StorageResult<Vec<EventRecord>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at FROM events ORDER BY pinned DESC, timestamp DESC LIMIT 1000"
-        )?;
-
-        let events = stmt.query_map([], |row| {
-            Ok(EventRecord {
-                id: row.get(0)?,
-                timestamp: row.get(1)?,
-                source: row.get(2)?,
-                payload_type: row.get(3)?,
-                payload_data: row.get(4)?,
-                window_title: row.get(5)?,
-                source_app: row.get(6)?,
-                content_hash: row.get(7)?,
-                pinned: row.get::<_, i32>(8)? != 0,
-                created_at: row.get(9)?,
-            })
-        })?;
-
-        let mut result = Vec::new();
-        for event in events {
-            result.push(event?);
-        }
-        Ok(result)
-    }
-
     /// Get events with optional filters (pinned_only, source_app)
     pub fn get_events(
         &self,
@@ -151,7 +133,7 @@ impl Database {
         source_app: Option<&str>,
     ) -> StorageResult<Vec<EventRecord>> {
         let conn = self.conn.lock().unwrap();
-        let mut sql = String::from("SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at FROM events");
+        let mut sql = String::from("SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at, classification FROM events");
         let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
         let mut param_values: Vec<String> = Vec::new();
         let mut where_clauses: Vec<String> = Vec::new();
@@ -189,6 +171,7 @@ impl Database {
                     content_hash: row.get(7)?,
                     pinned: row.get::<_, i32>(8)? != 0,
                     created_at: row.get(9)?,
+                    classification: row.get(10)?,
                 })
             })?;
 
@@ -208,6 +191,7 @@ impl Database {
                     content_hash: row.get(7)?,
                     pinned: row.get::<_, i32>(8)? != 0,
                     created_at: row.get(9)?,
+                    classification: row.get(10)?,
                 })
             })?;
 
@@ -231,70 +215,6 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM events WHERE pinned = 0", [])?;
         Ok(())
-    }
-
-    /// Get events by timestamp range with full metadata
-    pub fn get_events_by_timestamp_range(
-        &self,
-        start_ms: i64,
-        end_ms: i64,
-    ) -> StorageResult<Vec<EventRecord>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at FROM events 
-             WHERE timestamp >= ? AND timestamp <= ? 
-             ORDER BY timestamp DESC LIMIT 1000"
-        )?;
-
-        let events = stmt.query_map(params![start_ms, end_ms], |row| {
-            Ok(EventRecord {
-                id: row.get(0)?,
-                timestamp: row.get(1)?,
-                source: row.get(2)?,
-                payload_type: row.get(3)?,
-                payload_data: row.get(4)?,
-                window_title: row.get(5)?,
-                source_app: row.get(6)?,
-                content_hash: row.get(7)?,
-                pinned: row.get::<_, i32>(8)? != 0,
-                created_at: row.get(9)?,
-            })
-        })?;
-
-        let mut result = Vec::new();
-        for event in events {
-            result.push(event?);
-        }
-        Ok(result)
-    }
-
-    /// Get all events ordered by timestamp (descending)
-    pub fn get_all_events(&self) -> StorageResult<Vec<(String, i64, String)>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, timestamp, payload_data FROM events ORDER BY timestamp DESC LIMIT 1000",
-        )?;
-
-        let events = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
-
-        let mut result = Vec::new();
-        for event in events {
-            result.push(event?);
-        }
-        Ok(result)
-    }
-
-    /// Count total events
-    pub fn count_events(&self) -> StorageResult<i64> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))?;
-        Ok(count)
     }
 
     /// Check if content hash already exists (for deduplication)
@@ -353,36 +273,5 @@ impl Database {
             params![event_id],
         )?;
         Ok(())
-    }
-
-    /// Get pinned events
-    pub fn get_pinned_events(&self) -> StorageResult<Vec<EventRecord>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at FROM events 
-             WHERE pinned = 1 
-             ORDER BY timestamp DESC"
-        )?;
-
-        let events = stmt.query_map([], |row| {
-            Ok(EventRecord {
-                id: row.get(0)?,
-                timestamp: row.get(1)?,
-                source: row.get(2)?,
-                payload_type: row.get(3)?,
-                payload_data: row.get(4)?,
-                window_title: row.get(5)?,
-                source_app: row.get(6)?,
-                content_hash: row.get(7)?,
-                pinned: row.get::<_, i32>(8)? != 0,
-                created_at: row.get(9)?,
-            })
-        })?;
-
-        let mut result = Vec::new();
-        for event in events {
-            result.push(event?);
-        }
-        Ok(result)
     }
 }

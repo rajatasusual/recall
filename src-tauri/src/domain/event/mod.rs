@@ -3,8 +3,10 @@
 //! Contains event definitions and related types independent of
 //! persistence or framework concerns.
 
+use serde::{Deserialize, Serialize};
+
 /// Full event record with metadata (database representation)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventRecord {
     pub id: String,
     pub timestamp: i64,
@@ -16,5 +18,6 @@ pub struct EventRecord {
     pub content_hash: Option<String>,
     pub pinned: bool,
     pub created_at: i64,
+    pub classification: String,
 }
 

@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS events (
     source_app TEXT,
     content_hash TEXT,
     pinned INTEGER DEFAULT 0,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    classification TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC);

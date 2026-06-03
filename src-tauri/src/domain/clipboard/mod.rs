@@ -3,6 +3,7 @@
 //! This module handles clipboard monitoring and content processing,
 //! independent of persistence details (which are handled in the API/persistence layers).
 
+use crate::api::classification::classify_text;
 use crate::config::ClipboardConfig;
 use crate::core::Event;
 use crate::core::{EventPayload, EventSource};
@@ -47,14 +48,19 @@ impl ClipboardContent {
                 hash,
                 content,
                 is_truncated,
-            } => Event::new(
+            } => {
+                
+                let classification = classify_text(content).as_str().to_string();
+
+                Event::new(
                 EventSource::Clipboard,
                 EventPayload::ClipboardText {
                     content: content.clone(),
                     is_truncated: *is_truncated,
                     content_hash: hash.clone(),
+                    classification,
                 },
-            )
+            )}
             .with_context(window_title, source_app),
             Self::Image {
                 hash,
@@ -207,7 +213,7 @@ fn process_image(image: tauri::image::Image<'_>, config: &ClipboardConfig) -> Op
 }
 
 /// Emit clipboard content to storage, handling deduplication
-fn emit_content(
+fn content_to_db(
     content: ClipboardContent,
     writer: &Arc<EventWriter>,
     source_app: Option<String>,
@@ -253,7 +259,7 @@ pub async fn start_clipboard_watcher(
                         let hash = content.hash().to_string();
 
                         if last_hash.as_deref() != Some(&hash) {
-                            emit_content(
+                            content_to_db(
                                 content,
                                 &writer,
                                 source_app.clone(),
@@ -278,7 +284,7 @@ pub async fn start_clipboard_watcher(
                                 let image_hash = content.hash().to_string();
 
                                 if last_hash.as_deref() != Some(&image_hash) {
-                                    emit_content(
+                                    content_to_db(
                                         content,
                                         &writer,
                                         source_app.clone(),

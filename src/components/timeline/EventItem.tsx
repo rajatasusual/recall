@@ -28,7 +28,9 @@ export function EventItem({
           </span>
           
           {event.source_app && (
-            <span class="app-context">{event.source_app}</span>
+            <span class="app-context">{event.source_app} | {event.classification && (
+            <span class="classification-badge">{event.classification}</span>
+          )}</span>
           )}
           
           {event.payload.is_truncated && (

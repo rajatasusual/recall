@@ -33,7 +33,7 @@ fn build_tray_menu(
     app: &tauri::AppHandle,
     db: &std::sync::Arc<persistence::Database>,
 ) -> tauri::Result<AppMenu> {
-    let clipboard_items = db.get_pinned_events().unwrap_or_default();
+    let clipboard_items = db.get_events(Some(true), None).unwrap_or_default();
 
     let quit_i = tauri::menu::MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
@@ -131,7 +131,8 @@ pub fn run() {
                 .shadow(true)
                 .hidden_title(true)
                 .center()
-                .inner_size(800.0, 600.0)
+                .inner_size(640.0, 800.0)
+                .min_inner_size(640.0, 800.0)
                 .build()?;
 
             #[cfg(desktop)]
@@ -154,7 +155,7 @@ pub fn run() {
             // Initialize database first (needed for tray menu)
             let app_dir = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&app_dir)?;
-            
+
             let db_config = config::StorageConfig::default();
 
             let db_path = app_dir.join(db_config.database_path.clone());
@@ -192,7 +193,7 @@ pub fn run() {
                             .parse::<usize>()
                         {
                             let clipboard_items =
-                                db_for_menu.get_pinned_events().unwrap_or_default();
+                                db_for_menu.get_events(Some(true), None).unwrap_or_default();
                             if let Some(rec) = clipboard_items.get(idx) {
                                 tracing::info!("Copying clipboard item {} to clipboard", idx);
                                 domain::clipboard::copy_event_to_clipboard(rec, &db_for_menu, app);
@@ -226,7 +227,12 @@ pub fn run() {
             let clipboard_writer = writer.clone();
             let clipboard_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                domain::clipboard::start_clipboard_watcher(clipboard_writer, clipboard_app_handle, ClipboardConfig::default()).await;
+                domain::clipboard::start_clipboard_watcher(
+                    clipboard_writer,
+                    clipboard_app_handle,
+                    ClipboardConfig::default(),
+                )
+                .await;
             });
 
             app.manage(db.clone());
@@ -248,14 +254,10 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            commands::events::get_all_events,
             commands::events::get_events,
-            commands::events::get_events_by_timestamp_range,
-            commands::events::get_pinned_events,
             commands::events::pin_event,
             commands::events::unpin_event,
             commands::events::delete_event,
-            commands::events::get_event_count,
             commands::events::delete_all_events
         ])
         .run(tauri::generate_context!())

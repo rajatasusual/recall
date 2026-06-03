@@ -11,4 +11,5 @@ export interface EventRecord {
   content_hash?: string | null;
   pinned: boolean;
   created_at: number;
+  classification?: string;
 }

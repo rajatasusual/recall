@@ -1,7 +1,9 @@
+use crate::api::services::format_event_record;
 use crate::config::WriterConfig;
 use crate::core::Event;
 use crate::domain::EventRecord;
 use crate::persistence::{Database, StorageResult};
+
 use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
@@ -154,13 +156,16 @@ impl EventWriter {
 
         // Insert events
         for event in batch.iter() {
-            Self::insert_event_record(db, event)?;
+            let event_record = Self::insert_event_record(db, event)?;
+            let formatted_record = format_event_record(event_record);
+
             // emit to frontend listeners if available
             if let Some(ref app) = emitter {
                 // best-effort emit; ignore errors
                 let _ = app.emit(
                     "events:new",
-                    serde_json::to_value(event).unwrap_or(serde_json::json!({"id": event.id})),
+                    serde_json::to_value(&formatted_record)
+                        .unwrap_or(serde_json::json!({"id": event.id})),
                 );
             }
         }
@@ -184,7 +189,7 @@ impl EventWriter {
     }
 
     /// Insert a single event record into database
-    fn insert_event_record(db: &Arc<Database>, event: &Event) -> StorageResult<()> {
+    fn insert_event_record(db: &Arc<Database>, event: &Event) -> StorageResult<EventRecord> {
         let payload_data = serde_json::to_string(&event.payload)?;
 
         // Extract content_hash from payload and persist any binary blobs
@@ -224,6 +229,11 @@ impl EventWriter {
             content_hash: content_hash.map(str::to_string),
             pinned: false,
             created_at: now,
+            classification: event
+                .payload
+                .classification()
+                .map(str::to_owned)
+                .unwrap_or_else(|| "unclassified".into()),
         };
 
         db.insert_event(&event_record)?;
@@ -233,6 +243,6 @@ impl EventWriter {
             event.id,
             event.source.as_str()
         );
-        Ok(())
+        Ok(event_record)
     }
 }

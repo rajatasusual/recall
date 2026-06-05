@@ -111,6 +111,19 @@ select {
   color: var(--text);
 }
 
+input[type="search"] {
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+}
+
+input[type="search"]::placeholder {
+  color: var(--muted);
+}
+
 .app {
   min-height: 100vh;
   padding: 8px;
@@ -169,12 +182,41 @@ select {
   border-bottom: 1px solid var(--panel-border);
 }
 
+.search-row {
+  margin-bottom: 12px;
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  width: 100%;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--select-border);
+}
+
+.search-icon {
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
 .header-top {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   justify-content: space-between;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .header-top label {
@@ -285,9 +327,17 @@ select {
 .event-meta .time,
 .event-meta .app-context,
 .event-meta .classification-badge,
+.event-meta .window-title,
 .event-meta .truncation-badge {
   display: inline-flex;
   align-items: center;
+}
+
+.window-title {
+  max-width: min(460px, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .event-meta .truncation-badge {
@@ -306,6 +356,19 @@ select {
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+mark {
+  padding: 0 2px;
+  border-radius: 4px;
+  background: rgba(232, 255, 110, 0.42);
+  color: inherit;
+}
+
+@media (prefers-color-scheme: light) {
+  mark {
+    background: rgba(255, 214, 10, 0.38);
+  }
 }
 
 .event-actions {

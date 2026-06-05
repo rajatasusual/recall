@@ -7,11 +7,13 @@ interface EventHeaderProps {
   pinnedOnly: boolean;
   sourceAppFilter: string | null;
   classificationFilter: string | null;
+  searchQuery: string;
   lastRefresh: Date;
   toastMessage: string | null;
   onPinnedOnlyChange: (value: boolean) => void;
   onSourceAppChange: (app: string | null) => void;
   onClassificationChange: (classification: string | null) => void;
+  onSearchChange: (query: string) => void;
   onDeleteAll: () => void;
   deleteAllClicked: boolean;
 }
@@ -21,11 +23,13 @@ export function EventHeader({
   pinnedOnly,
   sourceAppFilter,
   classificationFilter,
+  searchQuery,
   lastRefresh,
   toastMessage,
   onPinnedOnlyChange,
   onSourceAppChange,
   onClassificationChange,
+  onSearchChange,
   onDeleteAll,
   deleteAllClicked,
 }: EventHeaderProps): VNode {
@@ -40,12 +44,29 @@ export function EventHeader({
     const select = e.currentTarget as HTMLSelectElement;
     onSourceAppChange(select.value || null);
   };
+  const handleSearchInput = (e: Event) => {
+    const input = e.currentTarget as HTMLInputElement;
+    onSearchChange(input.value);
+  };
 
   return (
     <div class="timeline-header">
+      <div class="search-row">
+        <div class="search-field">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            value={searchQuery}
+            onInput={handleSearchInput}
+            placeholder="Search clips, apps, dates"
+            aria-label="Search clips"
+          />
+        </div>
+      </div>
+
       <div class="header-top">
-        <div style="display:flex;gap:8px;align-items:center">
-          <label style="font-size:12px;color:var(--muted)">
+        <div class="filter-row">
+          <label>
             <input
               type="checkbox"
               checked={pinnedOnly}

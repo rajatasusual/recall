@@ -1,4 +1,4 @@
-use crate::api::{EventService};
+use crate::api::EventService;
 use crate::error::AppError;
 use tauri::State;
 
@@ -8,10 +8,16 @@ pub fn get_events(
     pinned_only: Option<bool>,
     source_app: Option<String>,
     classification: Option<String>,
+    query: Option<String>,
     service: State<'_, EventService>,
 ) -> Result<serde_json::Value, String> {
     service
-        .get_events(pinned_only, source_app.as_deref(), classification.as_deref())
+        .get_events(
+            pinned_only,
+            source_app.as_deref(),
+            classification.as_deref(),
+            query.as_deref(),
+        )
         .map(|events| serde_json::json!(events))
         .map_err(|e| serde_json::to_string(&e).unwrap_or_else(|_| "Unknown error".to_string()))
 }

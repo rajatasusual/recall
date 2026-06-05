@@ -5,6 +5,7 @@ import { EventActions } from "./EventActions";
 
 interface EventItemProps {
   event: EventRecord;
+  searchQuery: string;
   onPin: (eventId: string, isPinned: boolean) => Promise<void>;
   onCopy: (event: EventRecord) => Promise<void>;
   onDelete: (eventId: string) => Promise<void>;
@@ -12,25 +13,47 @@ interface EventItemProps {
 
 export function EventItem({
   event,
+  searchQuery,
   onPin,
   onCopy,
   onDelete,
 }: EventItemProps): VNode {
+  const preview = getPayloadPreview(event.payload);
+  const searchActive = searchQuery.trim().length > 0;
+  const eventDate = new Date(event.timestamp);
+  const visibleTimestamp = searchActive
+    ? `${eventDate.toLocaleString()} ${eventDate.toISOString().slice(0, 10)}`
+    : formatTimestamp(event.timestamp);
+  const shouldTruncate =
+    event.payload.type !== "clipboard_image" &&
+    typeof event.payload.content === "string" &&
+    event.payload.content.length > 80;
+
   return (
     <div key={event.id} class={`event-item ${event.pinned ? "pinned" : ""}`}>
       <div class="event-header">
         <div class="event-meta">
           <span
             class="time"
-            title={new Date(event.timestamp).toLocaleString()}
+            title={eventDate.toLocaleString()}
           >
-            {formatTimestamp(event.timestamp)}
+            {highlightText(visibleTimestamp, searchQuery)}
           </span>
           
           {event.source_app && (
-            <span class="app-context">{event.source_app} | {event.classification && (
-            <span class="classification-badge">{event.classification}</span>
-          )}</span>
+            <span class="app-context">{highlightText(event.source_app, searchQuery)}</span>
+          )}
+
+          {event.classification && (
+            <span class="classification-badge">
+              {highlightText(event.classification, searchQuery)}
+            </span>
+          )}
+
+          {event.window_title && (
+            <span class="window-title">
+              {highlightText(event.window_title, searchQuery)}
+            </span>
           )}
           
           {event.payload.is_truncated && (
@@ -52,8 +75,8 @@ export function EventItem({
           )
         ) : (
           <>
-            {getPayloadPreview(event.payload)}
-            {event.payload.content && event.payload.content.length > 80 && "..."}
+            {highlightText(preview, searchQuery)}
+            {shouldTruncate && "..."}
           </>
         )}
       </div>
@@ -66,4 +89,32 @@ export function EventItem({
       />
     </div>
   );
+}
+
+function highlightText(text: string, query: string): Array<string | VNode> {
+  const terms = Array.from(
+    new Set(query.trim().split(/\s+/).filter(Boolean).map(escapeRegExp))
+  );
+
+  if (terms.length === 0) {
+    return [text];
+  }
+
+  const matcher = new RegExp(`(${terms.join("|")})`, "gi");
+
+  return text.split(matcher).map((part, index) => {
+    if (!part) {
+      return "";
+    }
+
+    if (terms.some((term) => new RegExp(`^${term}$`, "i").test(part))) {
+      return <mark key={`${part}-${index}`}>{part}</mark>;
+    }
+
+    return part;
+  });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

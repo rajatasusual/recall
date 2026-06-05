@@ -4,6 +4,7 @@ import { EventItem } from "./EventItem";
 
 interface EventListProps {
   events: EventRecord[];
+  searchQuery: string;
   onPin: (eventId: string, isPinned: boolean) => Promise<void>;
   onCopy: (event: EventRecord) => Promise<void>;
   onDelete: (eventId: string) => Promise<void>;
@@ -11,6 +12,7 @@ interface EventListProps {
 
 export function EventList({
   events,
+  searchQuery,
   onPin,
   onCopy,
   onDelete,
@@ -18,7 +20,9 @@ export function EventList({
   if (events.length === 0) {
     return (
       <div class="events-list">
-        <div class="empty-state">Waiting for clipboard events...</div>
+        <div class="empty-state">
+          {searchQuery ? "No matching clips" : "Waiting for clipboard events..."}
+        </div>
       </div>
     );
   }
@@ -30,6 +34,7 @@ export function EventList({
           <EventItem
             key={event.id}
             event={event}
+            searchQuery={searchQuery}
             onPin={onPin}
             onCopy={onCopy}
             onDelete={onDelete}

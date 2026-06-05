@@ -132,6 +132,7 @@ impl Database {
         pinned_only: Option<bool>,
         source_app: Option<&str>,
         classification: Option<&str>,
+        query: Option<&str>,
     ) -> StorageResult<Vec<EventRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut sql = String::from("SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at, classification FROM events");
@@ -150,6 +151,23 @@ impl Database {
         if let Some(class) = classification {
             where_clauses.push("classification = ?".to_string());
             param_values.push(class.to_string());
+        }
+
+        if let Some(query) = query.map(str::trim).filter(|value| !value.is_empty()) {
+            for term in query.split_whitespace() {
+                let like_term = format!("%{}%", escape_like_term(term));
+                where_clauses.push(
+                    "(payload_data LIKE ? ESCAPE '\\' \
+                    OR source_app LIKE ? ESCAPE '\\' \
+                    OR window_title LIKE ? ESCAPE '\\' \
+                    OR classification LIKE ? ESCAPE '\\' \
+                    OR source LIKE ? ESCAPE '\\' \
+                    OR strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch', 'localtime') LIKE ? ESCAPE '\\' \
+                    OR strftime('%m/%d/%Y', timestamp / 1000, 'unixepoch', 'localtime') LIKE ? ESCAPE '\\')"
+                        .to_string(),
+                );
+                param_values.extend(std::iter::repeat_n(like_term, 7));
+            }
         }
 
         if !where_clauses.is_empty() {
@@ -278,4 +296,10 @@ impl Database {
         )?;
         Ok(())
     }
+}
+
+fn escape_like_term(term: &str) -> String {
+    term.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }

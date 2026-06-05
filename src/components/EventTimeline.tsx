@@ -19,9 +19,20 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   const [pinnedOnly, setPinnedOnly] = useState<boolean>(false);
   const [sourceAppFilter, setSourceAppFilter] = useState<string | null>(null);
   const [classificationFilter, setClassificationFilter] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>("");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const deleteAllClickedRef = useRef<boolean>(false);
+  const loadRequestRef = useRef<number>(0);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 180);
+
+    return () => window.clearTimeout(id);
+  }, [searchQuery]);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -35,6 +46,8 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   };
 
   const loadEvents = async () => {
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
     setError(null);
     try {
       const allEvents: EventRecord[] = await invoke("get_events", {
@@ -42,10 +55,17 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
         pinnedOnly: pinnedOnly,
         source_app: sourceAppFilter,
         classification: classificationFilter,
+        query: debouncedSearchQuery || null,
       });
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
       setEvents(allEvents);
       setLastRefresh(new Date());
     } catch (err) {
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
       setError(formatError(err));
     }
   };
@@ -58,6 +78,9 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
       return;
     }
     if (classificationFilter && newEvent.classification !== classificationFilter) {
+      return;
+    }
+    if (!matchesEventSearch(newEvent, debouncedSearchQuery)) {
       return;
     }
 
@@ -76,7 +99,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
 
       const next = [...prevEvents];
       next.splice(insertAt, 0, newEvent);
-      return next;
+      return next.slice(0, 1000);
     });
     setLastRefresh(new Date());
   };
@@ -106,7 +129,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
     })();
 
     return () => stop();
-  }, [refreshInterval, pinnedOnly, sourceAppFilter, classificationFilter]);
+  }, [refreshInterval, pinnedOnly, sourceAppFilter, classificationFilter, debouncedSearchQuery]);
 
   const handlePin = async (eventId: string, isPinned: boolean) => {
     try {
@@ -162,6 +185,10 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
     setClassificationFilter(classification);
   };
 
+  const handleSearchChange = (query: string) => {
+    setSearchQuery(query);
+  };
+
   return (
     <div class="event-timeline">
       <EventHeader
@@ -169,11 +196,13 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
         pinnedOnly={pinnedOnly}
         sourceAppFilter={sourceAppFilter}
         classificationFilter={classificationFilter}
+        searchQuery={searchQuery}
         lastRefresh={lastRefresh}
         toastMessage={toastMessage}
         onPinnedOnlyChange={handlePinnedOnlyChange}
         onSourceAppChange={handleSourceAppChange}
         onClassificationChange={handleClassificationChange}
+        onSearchChange={handleSearchChange}
         onDeleteAll={handleDeleteAll}
         deleteAllClicked={deleteAllClickedRef.current}
       />
@@ -182,6 +211,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
 
       <EventList
         events={events}
+        searchQuery={debouncedSearchQuery}
         onPin={handlePin}
         onCopy={handleCopy}
         onDelete={handleDelete}
@@ -190,3 +220,27 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
   );
 }
 
+function matchesEventSearch(event: EventRecord, query: string): boolean {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+  if (terms.length === 0) {
+    return true;
+  }
+
+  const searchable = [
+    event.source,
+    event.source_app,
+    event.classification,
+    event.window_title,
+    event.payload?.content,
+    event.payload?.preview,
+    event.content_hash,
+    new Date(event.timestamp).toLocaleString(),
+    new Date(event.timestamp).toISOString(),
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+
+  return terms.every((term) => searchable.includes(term));
+}

@@ -23,16 +23,12 @@ impl EventService {
         pinned_only: Option<bool>,
         source_app: Option<&str>,
         classification: Option<&str>,
+        query: Option<&str>,
     ) -> AppResult<Vec<Value>> {
         self.db
-            .get_events(pinned_only, source_app, classification)
+            .get_events(pinned_only, source_app, classification, query)
             .map_err(|e| e.into())
-            .map(|records| {
-                records
-                    .into_iter()
-                    .map(format_event_record)
-                    .collect()
-            })
+            .map(|records| records.into_iter().map(format_event_record).collect())
     }
 
     /// Pin an event by ID

@@ -1,15 +1,3 @@
-1. Automatic content classification
-
-* Code snippets
-* URLs
-* Emails
-* Phone numbers
-* File paths
-* Commands
-* Images
-
-This enables type-specific actions later.
-
 2. Search-first retrieval
 
 * Instant fuzzy search

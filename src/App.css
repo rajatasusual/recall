@@ -2,7 +2,7 @@
 
 :root {
   color-scheme: light dark;
-  --app-bg: radial-gradient(circle at bottom, rgba(10, 132, 255, 0.36), transparent 90%), linear-gradient(180deg, #f7f7f9 0%, #efeff2 100%);
+  --app-bg: radial-gradient(circle at bottom, rgba(10, 132, 255, 0.30), transparent 90%), linear-gradient(180deg, rgba(247, 247, 249, 0.82) 0%, rgba(239, 239, 242, 0.76) 100%);
   --panel: rgba(255, 255, 255, 0.88);
   --panel-border: rgba(60, 60, 67, 0.14);
   --header-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(245, 245, 247, 0.95));
@@ -29,7 +29,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --app-bg: radial-gradient(circle at top, rgba(10, 132, 255, 0.36), transparent 90%), linear-gradient(180deg, #111115 0%, #141418 100%);
+    --app-bg: radial-gradient(circle at top, rgba(10, 132, 255, 0.30), transparent 90%), linear-gradient(180deg, rgba(17, 17, 21, 0.84) 0%, rgba(20, 20, 24, 0.78) 100%);
     --panel: rgba(24, 24, 30, 0.92);
     --panel-border: rgba(255, 255, 255, 0.08);
     --header-bg: linear-gradient(180deg, rgba(24, 24, 30, 0.36), rgba(28, 28, 34, 0.36));
@@ -63,6 +63,7 @@ html,
 body, #app {
   min-height: 100%;
   overflow: hidden;
+  background: transparent;
   -webkit-text-size-adjust: 100%;
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -73,7 +74,7 @@ body, #app {
 body {
   margin: 0;
   font-family: 'Syne', sans-serif;
-  background: var(--app-bg);
+  background: transparent;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -130,7 +131,7 @@ input[type="search"]::placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: var(--app-bg);
   overflow: hidden;
 }
 
@@ -168,6 +169,7 @@ input[type="search"]::placeholder {
   flex-direction: column;
   border: 1px solid var(--panel-border);
   border-radius: 12px;
+  background: var(--panel);
   backdrop-filter: blur(18px);
   overflow: hidden;
   margin-bottom: 20px;
@@ -375,6 +377,7 @@ mark {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
 }
 
 .pin-btn {
@@ -393,6 +396,30 @@ mark {
   color: var(--accent);
 }
 
+.copy-format-actions {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(58px, 1fr));
+  gap: 6px;
+  flex: 1 1 420px;
+  min-width: min(100%, 360px);
+}
+
+.copy-format-btn {
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-format-btn:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
 .delete-btn {
   background: rgba(255, 69, 58, 0.12);
   color: var(--danger);
@@ -400,4 +427,186 @@ mark {
 
 button.clicked {
   transform: scale(0.98);
+}
+
+.quick-overlay {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 14px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  backdrop-filter: blur(22px);
+  overflow: hidden;
+}
+
+.quick-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  -webkit-app-region: drag;
+}
+
+.quick-overlay-subtitle {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quick-overlay-close {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 22px;
+  line-height: 1;
+  -webkit-app-region: no-drag;
+}
+
+.quick-overlay-error {
+  max-height: 64px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--error-border);
+  background: var(--error-bg);
+  color: var(--danger);
+  font: 12px/1.4 "JetBrains Mono", monospace;
+}
+
+.quick-overlay-list {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.quick-overlay-empty {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.quick-overlay-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.quick-overlay-row.selected {
+  border-color: rgba(10, 132, 255, 0.28);
+  background: var(--accent-soft);
+}
+
+.quick-overlay-number {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--badge-bg);
+  color: var(--muted);
+  font: 12px/1 "JetBrains Mono", monospace;
+}
+
+.quick-overlay-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.quick-overlay-preview img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.quick-overlay-meta {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quick-overlay-actions {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.quick-overlay-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.quick-overlay-actions button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.quick-overlay-actions kbd {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--badge-bg);
+  color: var(--accent);
+  font: 11px/1 "JetBrains Mono", monospace;
+}
+
+.quick-overlay-actions span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 720px) {
+  .copy-format-actions,
+  .quick-overlay-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .quick-overlay-meta {
+    display: none;
+  }
+
+  .quick-overlay-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
 }

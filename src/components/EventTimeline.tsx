@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { EventRecord } from "../types";
+import { ClipboardFormat, EventRecord } from "../types";
 import { EventHeader } from "./timeline/EventHeader";
 import { EventList } from "./timeline/EventList";
 import { ErrorBox } from "./timeline/ErrorBox";
-import { copyEventContent } from "./helpers/clipboard";
 import { formatError } from "./helpers/formatting";
 
 interface EventTimelineProps {
@@ -143,11 +142,28 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
 
   const handleCopy = async (event: EventRecord) => {
     try {
-      await copyEventContent(event);
+      await copyEvent(event, "original");
       showToast("Copied");
     } catch (err) {
       setError(formatError(err));
     }
+  };
+
+  const handleCopyFormat = async (event: EventRecord, format: ClipboardFormat) => {
+    try {
+      await copyEvent(event, format);
+      showToast("Copied");
+    } catch (err) {
+      setError(formatError(err));
+    }
+  };
+
+  const copyEvent = async (event: EventRecord, format: ClipboardFormat) => {
+    await invoke("copy_event_to_clipboard", {
+      event_id: event.id,
+      eventId: event.id,
+      format,
+    });
   };
 
   const handleDelete = async (eventId: string) => {
@@ -167,7 +183,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
     try {
       await invoke("delete_all_events");
       await loadEvents();
-      showToast("All unpinned events deleted.");
+      showToast("Cleared.");
     } catch (err) {
       setError(formatError(err));
     }
@@ -214,6 +230,7 @@ export function EventTimeline({ refreshInterval = 5000 }: EventTimelineProps) {
         searchQuery={debouncedSearchQuery}
         onPin={handlePin}
         onCopy={handleCopy}
+        onCopyFormat={handleCopyFormat}
         onDelete={handleDelete}
       />
     </div>

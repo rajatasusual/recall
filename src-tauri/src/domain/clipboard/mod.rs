@@ -42,26 +42,25 @@ impl ClipboardContent {
         }
     }
 
-    fn to_event(&self, source_app: Option<String>, window_title: Option<String>) -> Event {
+    fn to_event(&self) -> Event {
         match self {
             Self::Text {
                 hash,
                 content,
                 is_truncated,
             } => {
-                
                 let classification = classify_text(content).as_str().to_string();
 
                 Event::new(
-                EventSource::Clipboard,
-                EventPayload::ClipboardText {
-                    content: content.clone(),
-                    is_truncated: *is_truncated,
-                    content_hash: hash.clone(),
-                    classification,
-                },
-            )}
-            .with_context(window_title, source_app),
+                    EventSource::Clipboard,
+                    EventPayload::ClipboardText {
+                        content: content.clone(),
+                        is_truncated: *is_truncated,
+                        content_hash: hash.clone(),
+                        classification,
+                    },
+                )
+            }
             Self::Image {
                 hash,
                 png_bytes,
@@ -74,57 +73,9 @@ impl ClipboardContent {
                     preview: Some(preview_url.clone()),
                     data: Some(png_bytes.clone()),
                 },
-            )
-            .with_context(window_title, source_app),
+            ),
         }
     }
-}
-
-/// Get the current active application name (macOS-specific using system command)
-#[cfg(target_os = "macos")]
-fn get_active_app_and_window() -> (Option<String>, Option<String>) {
-    use std::process::Command;
-
-    let app_name = Command::new("osascript")
-        .arg("-e")
-        .arg(
-            "tell application \"System Events\" \
-             to return name of first application process whose frontmost is true",
-        )
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
-        .filter(|s| !s.is_empty());
-
-    let window_title = Command::new("osascript")
-        .arg("-e")
-        .arg(
-            "tell application \"System Events\" \
-             to tell first application process whose frontmost is true \
-             to try
-                return value of attribute \"AXTitle\" of front window
-             on error
-                return \"\"
-             end try",
-        )
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
-        .filter(|s| !s.is_empty());
-
-    (app_name, window_title)
 }
 
 /// Process text from clipboard into ClipboardContent
@@ -157,7 +108,10 @@ fn process_text(text: &str, config: &ClipboardConfig) -> Option<ClipboardContent
 }
 
 /// Process image from clipboard into ClipboardContent
-fn process_image(image: tauri::image::Image<'_>, config: &ClipboardConfig) -> Option<ClipboardContent> {
+fn process_image(
+    image: tauri::image::Image<'_>,
+    config: &ClipboardConfig,
+) -> Option<ClipboardContent> {
     tracing::debug!(
         "processing image: {}x{}, {} bytes",
         image.width(),
@@ -192,7 +146,11 @@ fn process_image(image: tauri::image::Image<'_>, config: &ClipboardConfig) -> Op
         )
         .ok()?;
 
-    let preview = dyn_img.resize(config.preview_max_dim, config.preview_max_dim, FilterType::Lanczos3);
+    let preview = dyn_img.resize(
+        config.preview_max_dim,
+        config.preview_max_dim,
+        FilterType::Lanczos3,
+    );
     let mut preview_buf = Vec::new();
     preview
         .write_to(
@@ -213,12 +171,7 @@ fn process_image(image: tauri::image::Image<'_>, config: &ClipboardConfig) -> Op
 }
 
 /// Emit clipboard content to storage, handling deduplication
-fn content_to_db(
-    content: ClipboardContent,
-    writer: &Arc<EventWriter>,
-    source_app: Option<String>,
-    window_title: Option<String>,
-) {
+fn content_to_db(content: ClipboardContent, writer: &Arc<EventWriter>) {
     let content_hash = content.hash().to_string();
 
     match writer.content_exists(&content_hash) {
@@ -227,11 +180,12 @@ fn content_to_db(
         }
         Ok(false) | Err(_) => {
             // Either not found or dedup check failed; emit the event
-            let event = content.to_event(source_app, window_title);
+            let event = content.to_event();
             if let Err(err) = writer.write_event(event) {
                 tracing::warn!(
                     "clipboard_event_dropped: reason={} content_hash={}",
-                    err, content_hash
+                    err,
+                    content_hash
                 );
             }
         }
@@ -250,8 +204,6 @@ pub async fn start_clipboard_watcher(
         let mut last_hash: Option<String> = None;
 
         loop {
-            let (source_app, window_title) = get_active_app_and_window();
-
             // Try text first
             match clipboard.read_text() {
                 Ok(contents) => {
@@ -259,12 +211,7 @@ pub async fn start_clipboard_watcher(
                         let hash = content.hash().to_string();
 
                         if last_hash.as_deref() != Some(&hash) {
-                            content_to_db(
-                                content,
-                                &writer,
-                                source_app.clone(),
-                                window_title.clone(),
-                            );
+                            content_to_db(content, &writer);
                             last_hash = Some(hash);
                         }
                     }
@@ -284,12 +231,7 @@ pub async fn start_clipboard_watcher(
                                 let image_hash = content.hash().to_string();
 
                                 if last_hash.as_deref() != Some(&image_hash) {
-                                    content_to_db(
-                                        content,
-                                        &writer,
-                                        source_app.clone(),
-                                        window_title.clone(),
-                                    );
+                                    content_to_db(content, &writer);
 
                                     last_hash = Some(image_hash);
                                 }
@@ -305,7 +247,10 @@ pub async fn start_clipboard_watcher(
                                 && !msg.contains("NSPasteboardTypeString")
                                 && !msg.contains("NSPasteboard#types")
                             {
-                                tracing::error!("clipboard_watch_error: failed to read clipboard: {}", err);
+                                tracing::error!(
+                                    "clipboard_watch_error: failed to read clipboard: {}",
+                                    err
+                                );
                             }
 
                             last_hash = None;

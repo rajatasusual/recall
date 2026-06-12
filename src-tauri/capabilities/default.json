@@ -3,20 +3,16 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": [
-    "main"
+    "main",
+    "quick_overlay"
   ],
   "permissions": [
     "core:default",
-    "opener:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-close",
     "core:window:allow-set-resizable",
-    "core:window:allow-toggle-maximize",
-    "clipboard-manager:allow-read-image",
-    "clipboard-manager:allow-write-image",
-    "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text"
+    "core:window:allow-toggle-maximize"
   ]
 }

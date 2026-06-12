@@ -99,6 +99,19 @@ fn refresh_tray_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     tray_icon.set_menu(Some(menu))
 }
 
+fn show_quick_overlay(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("quick_overlay") {
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.minimize();
+        }
+
+        let _ = window.center();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = app.emit_to("quick_overlay", "quick-overlay:show", ());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize tracing
@@ -120,10 +133,11 @@ pub fn run() {
         }))
         .plugin(
             WindowBuilder::default()
-                .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
+                .with_state_flags(
+                    StateFlags::all() & !StateFlags::DECORATIONS & !StateFlags::VISIBLE,
+                )
                 .build(),
         )
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -131,11 +145,26 @@ pub fn run() {
                 .decorations(true)
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
                 .shadow(true)
+                .transparent(true)
                 .hidden_title(true)
                 .center()
                 .inner_size(640.0, 800.0)
                 .min_inner_size(640.0, 800.0)
                 .build()?;
+
+            let quick_overlay =
+                WebviewWindowBuilder::new(app, "quick_overlay", WebviewUrl::default())
+                    .title("Recall Quick Copy")
+                    .decorations(false)
+                    .shadow(true)
+                    .transparent(true)
+                    .always_on_top(true)
+                    .resizable(false)
+                    .visible(false)
+                    .inner_size(560.0, 620.0)
+                    .min_inner_size(480.0, 520.0)
+                    .build()?;
+            quick_overlay.hide()?;
 
             #[cfg(desktop)]
             {
@@ -143,11 +172,21 @@ pub fn run() {
 
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
-                        .with_shortcuts(["CmdOrCtrl+Q"])?
+                        .with_shortcuts(["CmdOrCtrl+Q", "CmdOrCtrl+Shift+V"])?
                         .with_handler(|app, shortcut, event| {
                             if event.state == ShortcutState::Pressed {
                                 tracing::info!("Global shortcut triggered: {shortcut}");
-                                app.exit(0);
+                                let shortcut_text = shortcut.to_string().to_ascii_lowercase();
+
+                                if shortcut_text.ends_with("+q") || shortcut_text.ends_with("keyq")
+                                {
+                                    app.exit(0);
+                                } else if shortcut_text.ends_with("+shift+v")
+                                    || (shortcut_text.contains("shift")
+                                        && shortcut_text.ends_with("keyv"))
+                                {
+                                    show_quick_overlay(app);
+                                }
                             }
                         })
                         .build(),
@@ -250,19 +289,56 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Prevent actual close
                 api.prevent_close();
-                // Hide or minimize instead
-                let _ = window.minimize();
+                if window.label() == "quick_overlay" {
+                    let _ = window.hide();
+                } else {
+                    let _ = window.minimize();
+                }
+            }
+
+            if let WindowEvent::Focused(false) = event {
+                if window.label() == "quick_overlay" {
+                    let _ = window.hide();
+                }
+            }
+
+            if let WindowEvent::Focused(true) = event {
+                if window.label() == "quick_overlay" {
+                    if let Some(main) = window.app_handle().get_webview_window("main") {
+                        let _ = main.minimize();
+                    }
+                } else if window.label() == "main" {
+                    if let Some(overlay) = window.app_handle().get_webview_window("quick_overlay") {
+                        let _ = overlay.hide();
+                    }
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
             commands::events::get_events,
+            commands::events::get_recent_events,
             commands::events::pin_event,
             commands::events::unpin_event,
             commands::events::delete_event,
-            commands::events::delete_all_events
+            commands::events::delete_all_events,
+            commands::events::copy_event_to_clipboard,
+            commands::events::hide_quick_overlay,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Some(overlay) = app.get_webview_window("quick_overlay") {
+                    let _ = overlay.hide();
+                }
+
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.unminimize();
+                    let _ = main.show();
+                    let _ = main.set_focus();
+                }
+            }
+        });
 }

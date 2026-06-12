@@ -1,3 +1,3 @@
 pub mod services;
 pub mod classification;
-pub use services::EventService;
+pub use services::{ClipboardOutput, EventService};

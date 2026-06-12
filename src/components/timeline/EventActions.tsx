@@ -1,11 +1,13 @@
 import { VNode } from "preact";
 import { useState } from "preact/hooks";
-import { EventRecord } from "../../types";
+import { ClipboardFormat, EventRecord } from "../../types";
+import { COPY_FORMATS } from "../helpers/copyFormats";
 
 interface EventActionsProps {
   event: EventRecord;
   onPin: (eventId: string, isPinned: boolean) => Promise<void>;
   onCopy: (event: EventRecord) => Promise<void>;
+  onCopyFormat: (event: EventRecord, format: ClipboardFormat) => Promise<void>;
   onDelete: (eventId: string) => Promise<void>;
 }
 
@@ -13,9 +15,11 @@ export function EventActions({
   event,
   onPin,
   onCopy,
+  onCopyFormat,
   onDelete,
 }: EventActionsProps): VNode {
   const [clicked, setClicked] = useState<string | null>(null);
+  const isImage = event.payload.type === "clipboard_image";
 
   const handleClick = (action: string, callback: () => Promise<void>) => {
     setClicked(action);
@@ -42,6 +46,22 @@ export function EventActions({
       >
         📋
       </button>
+
+      <div class="copy-format-actions" aria-label="Copy formats">
+        {COPY_FORMATS.map((action) => (
+          <button
+            key={action.format}
+            class={`copy-format-btn ${
+              clicked === action.format ? "clicked" : ""
+            }`}
+            disabled={isImage}
+            onClick={() => handleClick(action.format, () => onCopyFormat(event, action.format))}
+            title={action.title}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
 
       <button
         class={`delete-btn ${clicked === "delete" ? "clicked" : ""}`}

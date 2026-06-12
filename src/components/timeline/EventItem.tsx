@@ -1,5 +1,5 @@
 import { VNode } from "preact";
-import { EventRecord } from "../../types";
+import { ClipboardFormat, EventRecord } from "../../types";
 import { formatTimestamp, getPayloadPreview } from "../helpers/formatting";
 import { EventActions } from "./EventActions";
 
@@ -8,6 +8,7 @@ interface EventItemProps {
   searchQuery: string;
   onPin: (eventId: string, isPinned: boolean) => Promise<void>;
   onCopy: (event: EventRecord) => Promise<void>;
+  onCopyFormat: (event: EventRecord, format: ClipboardFormat) => Promise<void>;
   onDelete: (eventId: string) => Promise<void>;
 }
 
@@ -16,6 +17,7 @@ export function EventItem({
   searchQuery,
   onPin,
   onCopy,
+  onCopyFormat,
   onDelete,
 }: EventItemProps): VNode {
   const preview = getPayloadPreview(event.payload);
@@ -85,6 +87,7 @@ export function EventItem({
         event={event}
         onPin={onPin}
         onCopy={onCopy}
+        onCopyFormat={onCopyFormat}
         onDelete={onDelete}
       />
     </div>

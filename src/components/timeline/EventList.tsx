@@ -1,5 +1,5 @@
 import { VNode } from "preact";
-import { EventRecord } from "../../types";
+import { ClipboardFormat, EventRecord } from "../../types";
 import { EventItem } from "./EventItem";
 
 interface EventListProps {
@@ -7,6 +7,7 @@ interface EventListProps {
   searchQuery: string;
   onPin: (eventId: string, isPinned: boolean) => Promise<void>;
   onCopy: (event: EventRecord) => Promise<void>;
+  onCopyFormat: (event: EventRecord, format: ClipboardFormat) => Promise<void>;
   onDelete: (eventId: string) => Promise<void>;
 }
 
@@ -15,6 +16,7 @@ export function EventList({
   searchQuery,
   onPin,
   onCopy,
+  onCopyFormat,
   onDelete,
 }: EventListProps): VNode {
   if (events.length === 0) {
@@ -37,6 +39,7 @@ export function EventList({
             searchQuery={searchQuery}
             onPin={onPin}
             onCopy={onCopy}
+            onCopyFormat={onCopyFormat}
             onDelete={onDelete}
           />
         ))}

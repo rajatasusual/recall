@@ -1,7 +1,7 @@
 use crate::config::StorageConfig;
 use crate::domain::EventRecord;
 use crate::persistence::{schema, StorageResult};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -223,6 +223,69 @@ impl Database {
         }
 
         Ok(result)
+    }
+
+    /// Get the most recent events, ignoring pin ordering.
+    pub fn get_recent_events(&self, limit: usize) -> StorageResult<Vec<EventRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let limit = limit.clamp(1, 100) as i64;
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at, classification
+             FROM events
+             ORDER BY timestamp DESC
+             LIMIT ?",
+        )?;
+
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(EventRecord {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                source: row.get(2)?,
+                payload_type: row.get(3)?,
+                payload_data: row.get(4)?,
+                window_title: row.get(5)?,
+                source_app: row.get(6)?,
+                content_hash: row.get(7)?,
+                pinned: row.get::<_, i32>(8)? != 0,
+                created_at: row.get(9)?,
+                classification: row.get(10)?,
+            })
+        })?;
+
+        let mut result = Vec::new();
+        for event in rows {
+            result.push(event?);
+        }
+
+        Ok(result)
+    }
+
+    /// Get an event by id.
+    pub fn get_event(&self, event_id: &str) -> StorageResult<Option<EventRecord>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, timestamp, source, payload_type, payload_data, window_title, source_app, content_hash, pinned, created_at, classification
+             FROM events
+             WHERE id = ?",
+            params![event_id],
+            |row| {
+                Ok(EventRecord {
+                    id: row.get(0)?,
+                    timestamp: row.get(1)?,
+                    source: row.get(2)?,
+                    payload_type: row.get(3)?,
+                    payload_data: row.get(4)?,
+                    window_title: row.get(5)?,
+                    source_app: row.get(6)?,
+                    content_hash: row.get(7)?,
+                    pinned: row.get::<_, i32>(8)? != 0,
+                    created_at: row.get(9)?,
+                    classification: row.get(10)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
     }
 
     /// Delete an event by id

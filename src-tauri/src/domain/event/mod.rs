@@ -20,4 +20,3 @@ pub struct EventRecord {
     pub created_at: i64,
     pub classification: String,
 }
-
